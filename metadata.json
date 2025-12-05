@@ -1,0 +1,9 @@
+{
+  "name": "SecureVote Ai",
+  "description": "A secure, modern online voting system with biometric verification, AI fraud detection, and real-time analytics.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation"
+  ]
+}
