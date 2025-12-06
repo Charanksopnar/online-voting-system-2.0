@@ -1,6 +1,6 @@
 // Face Recognition Service - Communicates with DeepFace Docker API
 
-const BACKEND_URL = 'http://localhost:5000';
+const BACKEND_URL = '/deepface';
 
 export interface FaceRegistrationResult {
     success: boolean;
