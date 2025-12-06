@@ -19,29 +19,30 @@ export interface Address {
 export interface User {
   id: string;
   email: string;
-  role: UserRole;
   firstName: string;
   lastName: string;
-  photoUrl?: string; // Display photo
-  faceUrl?: string; // Biometric reference photo
-  verificationStatus: VerificationStatus;
-  isBlocked: boolean;
-  blockReason?: string;
   age?: number;
   dob?: string;
   phone?: string;
-  address?: Address;
-
-  // ID Details
-  idNumber?: string; // Primary ID Number (Legacy/Fallback)
-  idType?: 'AADHAAR' | 'VOTER_ID'; // Primary ID Type (Legacy/Fallback)
-  kycDocUrl?: string; // Primary Doc URL (Aadhaar)
-
-  // Specific Fields
+  address?: {
+    state: string;
+    district: string;
+    city: string;
+  };
+  photoUrl?: string;
+  faceUrl?: string;
+  faceEmbeddings?: number[]; // Face recognition embeddings from DeepFace
+  livenessVerified?: boolean; // Whether liveness detection was passed
+  idNumber?: string;
+  idType?: string;
+  kycDocUrl?: string;
   aadhaarNumber?: string;
   epicNumber?: string;
-  epicDocUrl?: string; // Secondary Doc URL (Voter ID)
-
+  epicDocUrl?: string;
+  role: UserRole;
+  verificationStatus: VerificationStatus;
+  isBlocked: boolean;
+  blockReason?: string;
   created_at?: string;
 }
 

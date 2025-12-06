@@ -1,11 +1,13 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRealtime } from '../../contexts/RealtimeContext';
 import { useNotification } from '../../contexts/NotificationContext';
-import { AlertTriangle, Lock, Info, Camera, CheckCircle, ShieldCheck, X, EyeOff } from 'lucide-react';
-import { analyzeFraudRisk, verifyFaceIdentity } from '../../services/geminiService';
+import { AlertTriangle, Lock, Info, Camera, CheckCircle, ShieldCheck, Loader2, EyeOff } from 'lucide-react';
+import { analyzeFraudRisk } from '../../services/geminiService';
+import { LivenessCamera } from '../../components/LivenessCamera';
+import { verifyFace, checkBackendHealth } from '../../services/faceService';
 
 export const VotingPage = () => {
   const { id } = useParams();
@@ -15,15 +17,21 @@ export const VotingPage = () => {
   const { addNotification } = useNotification();
   const [selectedCandidate, setSelectedCandidate] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showVerificationModal, setShowVerificationModal] = useState(false);
-  const [verificationStep, setVerificationStep] = useState<'CAMERA' | 'PROCESSING' | 'SUCCESS' | 'FAILED'>('CAMERA');
+  const [showLivenessCamera, setShowLivenessCamera] = useState(false);
+  const [verificationStep, setVerificationStep] = useState<'VERIFYING' | 'SUCCESS' | 'FAILED'>('VERIFYING');
+  const [showResultModal, setShowResultModal] = useState(false);
+  const [backendHealthy, setBackendHealthy] = useState<boolean | null>(null);
 
   const [violationCount, setViolationCount] = useState(0);
-  const videoRef = useRef<HTMLVideoElement>(null);
 
   const election = elections.find(e => e.id === id);
   const electionCandidates = candidates.filter(c => c.electionId === id);
   const hasVoted = votes.some(v => v.voterId === user?.id && v.electionId === id);
+
+  // Check backend health on mount
+  useEffect(() => {
+    checkBackendHealth().then(setBackendHealthy);
+  }, []);
 
   // BackscreenCapture: Background Policy Enforcement
   useEffect(() => {
@@ -93,83 +101,85 @@ export const VotingPage = () => {
       addNotification('ERROR', 'Session Blocked', 'Too many security violations. You cannot vote in this session.');
       return;
     }
-    setShowVerificationModal(true);
-    startCamera();
-  };
 
-  const startCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-    } catch (err) {
-      addNotification('ERROR', 'Camera Error', 'Camera required for voting verification.');
-      setShowVerificationModal(false);
-    }
-  };
+    // If user has no embeddings but is already VERIFIED, allow admin/manual-approval path without biometric
+    if (!user?.faceEmbeddings || user.faceEmbeddings.length === 0) {
+      if (!id || !selectedCandidate || !user) return;
 
-  const captureFrame = (): string | null => {
-    if (videoRef.current) {
-      const canvas = document.createElement('canvas');
-      canvas.width = videoRef.current.videoWidth;
-      canvas.height = videoRef.current.videoHeight;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(videoRef.current, 0, 0);
-        return canvas.toDataURL('image/jpeg').split(',')[1];
-      }
-    }
-    return null;
-  };
-
-  const verifyAndVote = async () => {
-    setVerificationStep('PROCESSING');
-
-    const liveFaceBase64 = captureFrame();
-
-    if (!liveFaceBase64 || !user?.faceUrl) {
-      addNotification('ERROR', 'Verification Error', 'Could not capture face or missing reference photo.');
-      setVerificationStep('FAILED');
+      setIsSubmitting(true);
+      (async () => {
+        try {
+          await castVote(id, selectedCandidate, user.id, 1); // higher risk score since biometric is skipped
+          addNotification('SUCCESS', 'Vote Cast Successfully', 'Your vote has been securely recorded.');
+          setTimeout(() => navigate('/User'), 2000);
+        } catch (e: any) {
+          addNotification('ERROR', 'Vote Failed', e.message || 'Error submitting vote.');
+          setIsSubmitting(false);
+        }
+      })();
       return;
     }
 
+    // For biometric path, require backend to be healthy and embeddings present
+    if (backendHealthy === false) {
+      addNotification('ERROR', 'Service Unavailable', 'Face verification service is offline. Please try again later or contact support.');
+      return;
+    }
+
+    setShowLivenessCamera(true);
+  };
+
+  const handleLivenessCaptureComplete = async (frames: string[]) => {
+    setShowLivenessCamera(false);
+    setShowResultModal(true);
+    setVerificationStep('VERIFYING');
+
     try {
-      const result = await verifyFaceIdentity(user.faceUrl, liveFaceBase64);
+      // Verify face using Python backend
+      const result = await verifyFace(frames, user!.faceEmbeddings);
 
-      if (result.match) {
+      if (result.match && result.confidence > 0.6) {
         setVerificationStep('SUCCESS');
-
-        if (videoRef.current && videoRef.current.srcObject) {
-          const stream = videoRef.current.srcObject as MediaStream;
-          stream.getTracks().forEach(track => track.stop());
-        }
 
         setTimeout(async () => {
           setIsSubmitting(true);
           try {
             if (id && selectedCandidate && user) {
-              await castVote(id, selectedCandidate, user.id);
-              addNotification('SUCCESS', 'Vote Verified & Cast', 'Your vote has been recorded on the blockchain.');
-              setTimeout(() => navigate('/User'), 1500);
+              await castVote(id, selectedCandidate, user.id, 1 - result.confidence);
+              addNotification('SUCCESS', 'Vote Cast Successfully', `Your vote has been securely recorded (Confidence: ${(result.confidence * 100).toFixed(1)}%).`);
+              setTimeout(() => navigate('/User'), 2000);
             }
-          } catch (e) {
-            addNotification('ERROR', 'Vote Failed', 'Error submitting vote.');
+          } catch (e: any) {
+            addNotification('ERROR', 'Vote Failed', e.message || 'Error submitting vote.');
             setIsSubmitting(false);
-            setShowVerificationModal(false);
+            setShowResultModal(false);
           }
-        }, 1000);
+        }, 2000);
 
       } else {
         setVerificationStep('FAILED');
-        addNotification('ERROR', 'Identity Mismatch', 'Face verification failed. Please try again or contact admin.');
+        addNotification('ERROR', 'Identity Verification Failed', `${result.message} (Confidence: ${(result.confidence * 100).toFixed(1)}%)`);
+
+        // Log fraud attempt
+        if (user && id) {
+          reportFraud({
+            id: Date.now().toString(),
+            voterId: user.id,
+            electionId: id,
+            reason: 'Face Verification Failed',
+            riskLevel: 'HIGH',
+            details: `Confidence: ${result.confidence}, Distance: ${result.distance}`,
+            timestamp: new Date().toISOString()
+          });
+        }
       }
 
-    } catch (e) {
+    } catch (e: any) {
       setVerificationStep('FAILED');
-      addNotification('ERROR', 'System Error', 'Verification service unavailable.');
+      addNotification('ERROR', 'System Error', e.message || 'Verification service unavailable.');
     }
   };
+
 
   if (hasVoted) {
     return (
@@ -190,7 +200,7 @@ export const VotingPage = () => {
         <div className="bg-white p-8 rounded-lg shadow-md text-center max-w-md">
           <AlertTriangle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
           <h2 className="text-xl font-bold text-gray-900">Verification Required</h2>
-          <p className="text-gray-600 mt-2 mb-6">You must complete biometric verification (KYC) before voting.</p>
+          <p className="text-gray-600 mt-2 mb-6">You must complete identity verification (KYC) before voting.</p>
           <button onClick={() => navigate('/IdVerification')} className="bg-primary-600 text-white px-6 py-2 rounded-lg">Go to Verification</button>
         </div>
       </div>
@@ -201,47 +211,32 @@ export const VotingPage = () => {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-10 relative">
-      {/* Verification Modal */}
-      {showVerificationModal && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl overflow-hidden max-w-md w-full shadow-2xl relative">
-            {verificationStep !== 'SUCCESS' && (
-              <button
-                onClick={() => setShowVerificationModal(false)}
-                className="absolute top-4 right-4 z-10 bg-white/20 hover:bg-white/40 p-1 rounded-full text-white"
-              >
-                <X size={20} />
-              </button>
-            )}
+      {/* Liveness Camera Modal */}
+      {showLivenessCamera && (
+        <LivenessCamera
+          onCapture={handleLivenessCaptureComplete}
+          onCancel={() => setShowLivenessCamera(false)}
+          mode="verify"
+        />
+      )}
 
+      {/* Result Modal */}
+      {showResultModal && (
+        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl overflow-hidden max-w-md w-full shadow-2xl">
             <div className="bg-gray-900 p-6 text-center text-white">
               <h3 className="text-xl font-bold flex items-center justify-center gap-2">
                 <ShieldCheck className="text-green-400" /> Secure Vote Verification
               </h3>
-              <p className="text-gray-400 text-sm mt-1">Biometric confirmation required</p>
+              <p className="text-gray-400 text-sm mt-1">Biometric confirmation in progress</p>
             </div>
 
             <div className="p-6 flex flex-col items-center">
-              {(verificationStep === 'CAMERA' || verificationStep === 'FAILED') && (
-                <>
-                  <div className="relative w-64 h-64 bg-black rounded-full overflow-hidden border-4 border-primary-500 mb-4 shadow-inner">
-                    <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover transform scale-x-[-1]" />
-                  </div>
-                  <p className="text-gray-600 text-center mb-6">Look directly at the camera to verify your identity.</p>
-                  <button
-                    onClick={verifyAndVote}
-                    className="w-full bg-primary-600 hover:bg-primary-700 text-white py-3 rounded-lg font-bold shadow-lg transition"
-                  >
-                    {verificationStep === 'FAILED' ? 'Retry Verification' : 'Verify & Cast Vote'}
-                  </button>
-                </>
-              )}
-
-              {verificationStep === 'PROCESSING' && (
+              {verificationStep === 'VERIFYING' && (
                 <div className="py-12 flex flex-col items-center">
-                  <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-primary-600 mb-4"></div>
+                  <Loader2 className="animate-spin rounded-full h-16 w-16 text-primary-600 mb-4" />
                   <h4 className="text-xl font-bold text-gray-800">Verifying Identity...</h4>
-                  <p className="text-gray-500">Matching biometric data with records</p>
+                  <p className="text-gray-500">Comparing face data with registration</p>
                 </div>
               )}
 
@@ -251,7 +246,34 @@ export const VotingPage = () => {
                     <CheckCircle className="w-10 h-10 text-green-600" />
                   </div>
                   <h4 className="text-2xl font-bold text-green-700 mb-1">Identity Verified!</h4>
-                  <p className="text-gray-500">Vote submitted successfully.</p>
+                  <p className="text-gray-500">Casting your vote securely...</p>
+                </div>
+              )}
+
+              {verificationStep === 'FAILED' && (
+                <div className="py-8 flex flex-col items-center">
+                  <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mb-4">
+                    <AlertTriangle className="w-10 h-10 text-red-600" />
+                  </div>
+                  <h4 className="text-2xl font-bold text-red-700 mb-1">Verification Failed</h4>
+                  <p className="text-gray-500 text-center mb-6">Your identity could not be verified. Please try again.</p>
+                  <div className="flex gap-3 w-full">
+                    <button
+                      onClick={() => setShowResultModal(false)}
+                      className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300"
+                    >
+                      Close
+                    </button>
+                    <button
+                      onClick={() => {
+                        setShowResultModal(false);
+                        setShowLivenessCamera(true);
+                      }}
+                      className="flex-1 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+                    >
+                      Retry
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -286,8 +308,8 @@ export const VotingPage = () => {
             <label
               key={candidate.id}
               className={`relative flex items-center p-4 rounded-xl border-2 cursor-pointer transition-all ${selectedCandidate === candidate.id
-                  ? 'border-primary-600 bg-primary-50 ring-1 ring-primary-500'
-                  : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                ? 'border-primary-600 bg-primary-50 ring-1 ring-primary-500'
+                : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
                 }`}
             >
               <input
@@ -323,8 +345,8 @@ export const VotingPage = () => {
             onClick={initiateVote}
             disabled={!selectedCandidate || isSubmitting || violationCount > 3}
             className={`px-8 py-3 rounded-lg font-bold text-white shadow-lg transition-all flex items-center gap-2 ${!selectedCandidate || isSubmitting || violationCount > 3
-                ? 'bg-gray-400 cursor-not-allowed'
-                : 'bg-gradient-to-r from-primary-600 to-primary-700 hover:from-primary-700 hover:to-primary-800 transform hover:-translate-y-0.5'
+              ? 'bg-gray-400 cursor-not-allowed'
+              : 'bg-gradient-to-r from-primary-600 to-primary-700 hover:from-primary-700 hover:to-primary-800 transform hover:-translate-y-0.5'
               }`}
           >
             {isSubmitting ? 'Processing...' : <>Review & Verify <Camera size={18} /></>}

@@ -25,6 +25,7 @@ import { KycReview } from './pages/admin/KycReview';
 import { RegionConfiguration } from './pages/admin/RegionConfiguration';
 import { InvalidVotes } from './pages/admin/InvalidVotes';
 import { AdminNotifications } from './pages/admin/AdminNotifications';
+import { AdminVisualizations } from './pages/admin/AdminVisualizations';
 import { Diagnostic } from './pages/common/Diagnostic';
 
 const AdminLogin = () => {
@@ -66,7 +67,7 @@ export default function App() {
                   <Route path="/AdminLogin" element={<AdminLogin />} />
                   <Route path="/Signup" element={<Signup />} />
                   <Route path="/diagnostic" element={<Diagnostic />} />
-                  
+
                   {/* User Protected Routes */}
                   <Route path="/User" element={<UserDashboard />} />
                   <Route path="/Edit" element={<EditProfile />} />
@@ -88,6 +89,7 @@ export default function App() {
                   <Route path="/AddElection" element={<AddElection />} />
                   <Route path="/admin/region-election" element={<RegionConfiguration />} />
                   <Route path="/admin/kyc-review" element={<KycReview />} />
+                  <Route path="/admin/visualizations" element={<AdminVisualizations />} />
                   <Route path="/invalidVotes" element={<InvalidVotes />} />
                   <Route path="/admin/notifications" element={<AdminNotifications />} />
                   <Route path="/calendar" element={<CalendarPage />} />

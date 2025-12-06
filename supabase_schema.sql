@@ -25,6 +25,8 @@ alter table public.profiles
   add column if not exists block_reason text,
   add column if not exists photo_url text,
   add column if not exists face_url text,
+  add column if not exists face_embeddings jsonb,
+  add column if not exists liveness_verified boolean default false,
   add column if not exists age int,
   add column if not exists dob text,
   add column if not exists phone text,

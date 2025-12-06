@@ -31,6 +31,8 @@ const mapProfileToUser = (profile: any): User => ({
   blockReason: profile.block_reason,
   photoUrl: profile.photo_url,
   faceUrl: profile.face_url,
+  faceEmbeddings: profile.face_embeddings, // JSONB array from database
+  livenessVerified: profile.liveness_verified,
   age: profile.age,
   dob: profile.dob,
   phone: profile.phone,
@@ -42,7 +44,7 @@ const mapProfileToUser = (profile: any): User => ({
   idNumber: profile.id_number,
   idType: profile.id_type,
   kycDocUrl: profile.kyc_doc_url,
-  
+
   // New Fields
   aadhaarNumber: profile.aadhaar_number,
   epicNumber: profile.epic_number,
@@ -67,7 +69,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             .select('*')
             .eq('id', session.user.id)
             .single();
-          
+
           if (profile) {
             setUser(mapProfileToUser(profile));
           }
@@ -86,15 +88,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (event === 'SIGNED_OUT') {
         setUser(null);
       } else if (event === 'SIGNED_IN' && session?.user) {
-         // Allow a small delay for trigger to create profile if this is a fresh signup
-         setTimeout(async () => {
-            const { data: profile } = await supabase
-                .from('profiles')
-                .select('*')
-                .eq('id', session.user.id)
-                .single();
-            if (profile) setUser(mapProfileToUser(profile));
-         }, 500);
+        // Allow a small delay for trigger to create profile if this is a fresh signup
+        setTimeout(async () => {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+          if (profile) setUser(mapProfileToUser(profile));
+        }, 500);
       }
     });
 
@@ -108,26 +110,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     if (!user?.id) return;
 
     const channel = supabase.channel(`public:profiles:id=eq.${user.id}`)
-      .on('postgres_changes', { 
-        event: 'UPDATE', 
-        schema: 'public', 
-        table: 'profiles', 
-        filter: `id=eq.${user.id}` 
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'profiles',
+        filter: `id=eq.${user.id}`
       }, (payload) => {
         // Update user state immediately with new profile data
         setUser(mapProfileToUser(payload.new));
-        
+
         // Notify user of status changes
         if (payload.new.verification_status !== payload.old.verification_status) {
-            if (payload.new.verification_status === 'VERIFIED') {
-                addNotification('SUCCESS', 'Identity Verified', 'You are now eligible to vote!');
-            } else if (payload.new.verification_status === 'REJECTED') {
-                addNotification('ERROR', 'Verification Rejected', 'Please contact support.');
-            }
+          if (payload.new.verification_status === 'VERIFIED') {
+            addNotification('SUCCESS', 'Identity Verified', 'You are now eligible to vote!');
+          } else if (payload.new.verification_status === 'REJECTED') {
+            addNotification('ERROR', 'Verification Rejected', 'Please contact support.');
+          }
         }
-        
+
         if (payload.new.is_blocked && !payload.old.is_blocked) {
-            addNotification('ERROR', 'Account Blocked', payload.new.block_reason || 'Contact Admin');
+          addNotification('ERROR', 'Account Blocked', payload.new.block_reason || 'Contact Admin');
         }
       })
       .subscribe();
@@ -162,16 +164,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       }
 
       if (profile.is_blocked) {
-         await supabase.auth.signOut();
-         throw new Error(`Account Blocked: ${profile.block_reason}`);
+        await supabase.auth.signOut();
+        throw new Error(`Account Blocked: ${profile.block_reason}`);
       }
 
       setUser(mapProfileToUser(profile));
       addNotification('SUCCESS', 'Welcome back', `Logged in as ${profile.first_name}`);
     } catch (error: any) {
       console.error("Login error:", error);
-      const msg = error.message === "Invalid login credentials" 
-        ? "Invalid email or password." 
+      const msg = error.message === "Invalid login credentials"
+        ? "Invalid email or password."
         : error.message;
       addNotification('ERROR', 'Login Failed', msg);
       throw error;
@@ -184,34 +186,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setLoading(true);
     try {
       const role = email.toLowerCase().includes('admin') ? UserRole.ADMIN : UserRole.VOTER;
-      
+
       if (!details.password) {
-          throw new Error("Password is required for signup");
+        throw new Error("Password is required for signup");
       }
 
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: email.trim().toLowerCase(),
         password: details.password,
         options: {
-            data: {
-                firstName,
-                lastName,
-                role,
-                age: details.age,
-                dob: details.dob,
-                phone: details.phone,
-                state: details.state,
-                district: details.district,
-                city: details.city,
-                idNumber: details.idNumber,
-                idType: details.idType,
-                kycDocUrl: details.kycDocUrl,
-                faceUrl: details.faceUrl,
-                // New Fields passed to metadata
-                aadhaarNumber: details.aadhaarNumber,
-                epicNumber: details.epicNumber,
-                epicDocUrl: details.epicDocUrl
-            }
+          data: {
+            firstName,
+            lastName,
+            role,
+            age: details.age,
+            dob: details.dob,
+            phone: details.phone,
+            state: details.state,
+            district: details.district,
+            city: details.city,
+            idNumber: details.idNumber,
+            idType: details.idType,
+            kycDocUrl: details.kycDocUrl,
+            faceUrl: details.faceUrl,
+            // New Fields passed to metadata
+            aadhaarNumber: details.aadhaarNumber,
+            epicNumber: details.epicNumber,
+            epicDocUrl: details.epicDocUrl
+          }
         }
       });
 

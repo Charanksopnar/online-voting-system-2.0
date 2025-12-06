@@ -61,6 +61,8 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
     blockReason: p.block_reason,
     photoUrl: p.photo_url,
     faceUrl: p.face_url,
+    faceEmbeddings: p.face_embeddings, // JSONB array from database
+    livenessVerified: p.liveness_verified,
     age: p.age,
     dob: p.dob,
     phone: p.phone,

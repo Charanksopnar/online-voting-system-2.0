@@ -1,9 +1,10 @@
 
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { 
-  LayoutDashboard, Users, UserCheck, Vote, PlusCircle, 
-  Calendar, Bell, AlertTriangle, Map, FileText, Activity 
+import {
+  LayoutDashboard, Users, UserCheck, Vote, PlusCircle,
+  Calendar, Bell, AlertTriangle, Map, FileText, Activity,
+  BarChart3 as BarChartIcon, Scale as KycReviewIcon
 } from 'lucide-react';
 
 export const Sidebar = () => {
@@ -11,7 +12,7 @@ export const Sidebar = () => {
     { icon: <LayoutDashboard size={20} />, label: 'Dashboard', path: '/Admin' },
     { icon: <Users size={20} />, label: 'Manage Voters', path: '/Voters' },
     { icon: <UserCheck size={20} />, label: 'Candidates Info', path: '/candidate' },
-    
+
     { type: 'divider', label: 'Pages' },
     { icon: <PlusCircle size={20} />, label: 'Add New Candidate', path: '/AddCandidate' },
     { icon: <PlusCircle size={20} />, label: 'Add New Election', path: '/AddElection' },
@@ -22,7 +23,8 @@ export const Sidebar = () => {
 
     { type: 'divider', label: 'Admin Config' },
     { icon: <Map size={20} />, label: 'Region Election', path: '/admin/region-election' },
-    { icon: <FileText size={20} />, label: 'KYC Review', path: '/admin/kyc-review' },
+    { icon: <KycReviewIcon size={20} />, label: 'KYC Review', path: '/admin/kyc-review' },
+    { icon: <BarChartIcon size={20} />, label: 'Visualizations', path: '/admin/visualizations' },
     { icon: <Activity size={20} />, label: 'Audit Logs', path: '/admin/logs' },
   ];
 
@@ -50,8 +52,8 @@ export const Sidebar = () => {
               to={item.path || '#'}
               className={({ isActive }) => `
                 flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200
-                ${isActive 
-                  ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 font-semibold shadow-sm' 
+                ${isActive
+                  ? 'bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 font-semibold shadow-sm'
                   : 'text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-slate-200'}
               `}
             >
