@@ -1,14 +1,27 @@
 
 import React, { useState, useMemo } from 'react';
 import { useRealtime } from '../../contexts/RealtimeContext';
+import { useNotification } from '../../contexts/NotificationContext';
 import { Link } from 'react-router-dom';
-import { Trash2, Search, Plus, Edit2, MapPin, Filter } from 'lucide-react';
+import { Trash2, Search, Plus, Edit2, MapPin, X, Save } from 'lucide-react';
+import { Candidate } from '../../types';
 
 export const CandidatesManagement = () => {
-    const { candidates, deleteCandidate, elections } = useRealtime();
+    const { candidates, deleteCandidate, updateCandidate, elections } = useRealtime();
+    const { addNotification } = useNotification();
     const [search, setSearch] = useState('');
     const [filterElection, setFilterElection] = useState('');
     const [filterRegion, setFilterRegion] = useState('');
+
+    // Edit modal state
+    const [editingCandidate, setEditingCandidate] = useState<Candidate | null>(null);
+    const [editForm, setEditForm] = useState({
+        name: '',
+        party: '',
+        age: '',
+        manifesto: ''
+    });
+    const [saving, setSaving] = useState(false);
 
     // Get election info for a candidate
     const getElectionInfo = (electionId?: string) => {
@@ -43,8 +56,123 @@ export const CandidatesManagement = () => {
         return election.region;
     };
 
+    // Edit handlers
+    const openEditModal = (candidate: Candidate) => {
+        setEditingCandidate(candidate);
+        setEditForm({
+            name: candidate.name,
+            party: candidate.party,
+            age: candidate.age?.toString() || '',
+            manifesto: candidate.manifesto || ''
+        });
+    };
+
+    const closeEditModal = () => {
+        setEditingCandidate(null);
+        setEditForm({ name: '', party: '', age: '', manifesto: '' });
+    };
+
+    const handleEditSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!editingCandidate) return;
+
+        if (!editForm.name.trim()) {
+            addNotification('ERROR', 'Validation', 'Name is required');
+            return;
+        }
+
+        setSaving(true);
+        try {
+            await updateCandidate(editingCandidate.id, {
+                name: editForm.name.trim(),
+                party: editForm.party.trim(),
+                age: editForm.age ? parseInt(editForm.age) : undefined,
+                manifesto: editForm.manifesto.trim()
+            });
+            closeEditModal();
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setSaving(false);
+        }
+    };
+
     return (
         <div className="min-h-screen">
+
+            {/* Edit Modal */}
+            {editingCandidate && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                    <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-lg w-full border border-slate-200 dark:border-slate-700 overflow-hidden">
+                        <div className="flex items-center justify-between p-5 border-b border-slate-200 dark:border-slate-700">
+                            <h3 className="text-lg font-bold text-slate-800 dark:text-white">Edit Candidate</h3>
+                            <button onClick={closeEditModal} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition">
+                                <X size={20} className="text-slate-500" />
+                            </button>
+                        </div>
+                        <form onSubmit={handleEditSubmit} className="p-5 space-y-4">
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Full Name</label>
+                                <input
+                                    type="text"
+                                    value={editForm.name}
+                                    onChange={e => setEditForm(prev => ({ ...prev, name: e.target.value }))}
+                                    className="input-standard w-full"
+                                    placeholder="Candidate Name"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Party</label>
+                                <input
+                                    type="text"
+                                    value={editForm.party}
+                                    onChange={e => setEditForm(prev => ({ ...prev, party: e.target.value }))}
+                                    className="input-standard w-full"
+                                    placeholder="Party Name"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Age</label>
+                                <input
+                                    type="number"
+                                    value={editForm.age}
+                                    onChange={e => setEditForm(prev => ({ ...prev, age: e.target.value }))}
+                                    className="input-standard w-full"
+                                    placeholder="Age"
+                                    min="18"
+                                    max="120"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Manifesto / Bio</label>
+                                <textarea
+                                    value={editForm.manifesto}
+                                    onChange={e => setEditForm(prev => ({ ...prev, manifesto: e.target.value }))}
+                                    className="input-standard w-full h-24 resize-none"
+                                    placeholder="Brief description or manifesto..."
+                                />
+                            </div>
+                            <div className="flex gap-3 pt-2">
+                                <button
+                                    type="button"
+                                    onClick={closeEditModal}
+                                    className="flex-1 px-4 py-2.5 border border-slate-300 dark:border-slate-600 rounded-lg font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={saving}
+                                    className="flex-1 px-4 py-2.5 bg-primary-600 hover:bg-primary-700 text-white rounded-lg font-bold flex items-center justify-center gap-2 transition disabled:opacity-50"
+                                >
+                                    <Save size={16} />
+                                    {saving ? 'Saving...' : 'Save Changes'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
 
             {/* Header */}
             <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
@@ -158,7 +286,10 @@ export const CandidatesManagement = () => {
                                         <td className="p-4 text-slate-600 dark:text-slate-400 font-mono">{candidate.age}</td>
                                         <td className="p-4">
                                             <div className="flex justify-center gap-2">
-                                                <button className="p-2 rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 hover:bg-blue-100 transition">
+                                                <button
+                                                    onClick={() => openEditModal(candidate)}
+                                                    className="p-2 rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 hover:bg-blue-100 transition"
+                                                >
                                                     <Edit2 size={16} />
                                                 </button>
                                                 <button onClick={() => deleteCandidate(candidate.id)} className="p-2 rounded-lg bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 hover:bg-red-100 transition">

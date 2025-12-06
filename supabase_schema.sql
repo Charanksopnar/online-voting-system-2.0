@@ -270,6 +270,7 @@ alter table public.official_voter_lists enable row level security;
 -- PROFILES
 drop policy if exists "Public profiles are viewable by everyone" on public.profiles;
 drop policy if exists "Users can update own profile" on public.profiles;
+drop policy if exists "Admins can update any profile" on public.profiles;
 
 create policy "Public profiles are viewable by everyone"
   on public.profiles
@@ -281,6 +282,23 @@ create policy "Users can update own profile"
   for update
   using (auth.uid() = id)
   with check (auth.uid() = id);
+
+-- Allow admins (users with role = 'ADMIN') to update any profile
+create policy "Admins can update any profile"
+  on public.profiles
+  for update
+  using (
+    exists (
+      select 1 from public.profiles
+      where id = auth.uid() and role = 'ADMIN'
+    )
+  )
+  with check (
+    exists (
+      select 1 from public.profiles
+      where id = auth.uid() and role = 'ADMIN'
+    )
+  );
 
 -- ELECTIONS
 drop policy if exists "Elections viewable by everyone" on public.elections;

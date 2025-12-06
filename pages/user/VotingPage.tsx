@@ -5,7 +5,6 @@ import { useAuth } from '../../contexts/AuthContext';
 import { useRealtime } from '../../contexts/RealtimeContext';
 import { useNotification } from '../../contexts/NotificationContext';
 import { AlertTriangle, Lock, Info, Camera, CheckCircle, ShieldCheck, Loader2, EyeOff } from 'lucide-react';
-import { analyzeFraudRisk } from '../../services/geminiService';
 import { LivenessCamera } from '../../components/LivenessCamera';
 import { verifyFace, checkBackendHealth } from '../../services/faceService';
 
@@ -21,6 +20,7 @@ export const VotingPage = () => {
   const [verificationStep, setVerificationStep] = useState<'VERIFYING' | 'SUCCESS' | 'FAILED'>('VERIFYING');
   const [showResultModal, setShowResultModal] = useState(false);
   const [backendHealthy, setBackendHealthy] = useState<boolean | null>(null);
+  const [faceAccuracy, setFaceAccuracy] = useState<number | null>(null);
 
   const [violationCount, setViolationCount] = useState(0);
 
@@ -33,7 +33,7 @@ export const VotingPage = () => {
     checkBackendHealth().then(setBackendHealthy);
   }, []);
 
-  // BackscreenCapture: Background Policy Enforcement
+  // BackscreenCapture: Background Policy Enforcement (Tab switch detection only)
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.hidden) {
@@ -47,30 +47,6 @@ export const VotingPage = () => {
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("blur", handleBlur);
-
-    // Initial Environment Check
-    const checkEnvironment = async () => {
-      const environmentData = {
-        mouseJitter: Math.random(),
-        windowFocusChanges: 0,
-        ipTrustScore: 0.95
-      };
-
-      const analysis = await analyzeFraudRisk(environmentData);
-      if (analysis.riskLevel === 'HIGH') {
-        addNotification('WARNING', 'Security Alert', 'Suspicious activity detected. Session flagged.');
-        reportFraud({
-          id: Date.now().toString(),
-          voterId: user?.id || 'unknown',
-          electionId: id || 'unknown',
-          reason: 'High Risk Environment',
-          riskLevel: 'HIGH',
-          details: analysis.reasoning,
-          timestamp: new Date().toISOString()
-        });
-      }
-    };
-    checkEnvironment();
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
@@ -102,21 +78,10 @@ export const VotingPage = () => {
       return;
     }
 
-    // If user has no embeddings but is already VERIFIED, allow admin/manual-approval path without biometric
+    // Block voting if no face embeddings exist - require biometric verification
     if (!user?.faceEmbeddings || user.faceEmbeddings.length === 0) {
-      if (!id || !selectedCandidate || !user) return;
-
-      setIsSubmitting(true);
-      (async () => {
-        try {
-          await castVote(id, selectedCandidate, user.id, 1); // higher risk score since biometric is skipped
-          addNotification('SUCCESS', 'Vote Cast Successfully', 'Your vote has been securely recorded.');
-          setTimeout(() => navigate('/User'), 2000);
-        } catch (e: any) {
-          addNotification('ERROR', 'Vote Failed', e.message || 'Error submitting vote.');
-          setIsSubmitting(false);
-        }
-      })();
+      addNotification('ERROR', 'Biometric Data Missing',
+        'No face verification data found. Please complete your KYC/face registration before voting.');
       return;
     }
 
@@ -138,7 +103,8 @@ export const VotingPage = () => {
       // Verify face using Python backend
       const result = await verifyFace(frames, user!.faceEmbeddings);
 
-      if (result.match && result.confidence > 0.6) {
+      if (result.match && result.confidence > 0.5) {
+        setFaceAccuracy(result.confidence * 100);
         setVerificationStep('SUCCESS');
 
         setTimeout(async () => {
@@ -157,6 +123,7 @@ export const VotingPage = () => {
         }, 2000);
 
       } else {
+        setFaceAccuracy(result.confidence * 100);
         setVerificationStep('FAILED');
         addNotification('ERROR', 'Identity Verification Failed', `${result.message} (Confidence: ${(result.confidence * 100).toFixed(1)}%)`);
 
@@ -194,14 +161,14 @@ export const VotingPage = () => {
     );
   }
 
-  if (user?.verificationStatus !== 'VERIFIED') {
+  if (!user?.electoralRollVerified) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-        <div className="bg-white p-8 rounded-lg shadow-md text-center max-w-md">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
+        <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-md text-center max-w-md">
           <AlertTriangle className="w-12 h-12 text-yellow-500 mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-gray-900">Verification Required</h2>
-          <p className="text-gray-600 mt-2 mb-6">You must complete identity verification (KYC) before voting.</p>
-          <button onClick={() => navigate('/IdVerification')} className="bg-primary-600 text-white px-6 py-2 rounded-lg">Go to Verification</button>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white">Electoral Roll Verification Required</h2>
+          <p className="text-gray-600 dark:text-gray-400 mt-2 mb-6">Your identity must be verified against the Electoral Roll before you can vote. Please wait for admin verification or request manual verification from your dashboard.</p>
+          <button onClick={() => navigate('/User')} className="bg-primary-600 text-white px-6 py-2 rounded-lg hover:bg-primary-700">Go to Dashboard</button>
         </div>
       </div>
     );
@@ -246,6 +213,12 @@ export const VotingPage = () => {
                     <CheckCircle className="w-10 h-10 text-green-600" />
                   </div>
                   <h4 className="text-2xl font-bold text-green-700 mb-1">Identity Verified!</h4>
+                  {faceAccuracy !== null && (
+                    <div className="mb-3 text-center">
+                      <div className="text-3xl font-bold text-green-600">{faceAccuracy.toFixed(1)}%</div>
+                      <div className="text-sm text-gray-500">Face Match Accuracy</div>
+                    </div>
+                  )}
                   <p className="text-gray-500">Casting your vote securely...</p>
                 </div>
               )}
@@ -256,6 +229,12 @@ export const VotingPage = () => {
                     <AlertTriangle className="w-10 h-10 text-red-600" />
                   </div>
                   <h4 className="text-2xl font-bold text-red-700 mb-1">Verification Failed</h4>
+                  {faceAccuracy !== null && (
+                    <div className="mb-3 text-center">
+                      <div className="text-3xl font-bold text-red-500">{faceAccuracy.toFixed(1)}%</div>
+                      <div className="text-sm text-gray-500">Face Match Accuracy (Min: 50%)</div>
+                    </div>
+                  )}
                   <p className="text-gray-500 text-center mb-6">Your identity could not be verified. Please try again.</p>
                   <div className="flex gap-3 w-full">
                     <button
@@ -349,7 +328,7 @@ export const VotingPage = () => {
               : 'bg-gradient-to-r from-primary-600 to-primary-700 hover:from-primary-700 hover:to-primary-800 transform hover:-translate-y-0.5'
               }`}
           >
-            {isSubmitting ? 'Processing...' : <>Review & Verify <Camera size={18} /></>}
+            {isSubmitting ? 'Processing...' : <><Camera size={18} /> Verify & Cast Vote</>}
           </button>
         </div>
       </div>

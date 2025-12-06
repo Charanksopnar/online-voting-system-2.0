@@ -68,7 +68,8 @@ export const UserDashboard = () => {
         return false;
     });
 
-    const isVerified = user?.verificationStatus === 'VERIFIED';
+    // User is eligible to vote if electoral roll is verified
+    const isVerified = user?.electoralRollVerified === true;
 
     // Handlers
     const handleKycClick = () => {
@@ -238,9 +239,9 @@ export const UserDashboard = () => {
                                     </div>
 
                                     <div className="flex justify-between items-center border-t border-gray-700 pt-3 mt-2">
-                                        <div className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${isVerified ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'
+                                        <div className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${isVerified ? 'bg-green-500/20 text-green-400' : 'bg-yellow-500/20 text-yellow-400'
                                             }`}>
-                                            {user?.verificationStatus}
+                                            {isVerified ? 'VERIFIED' : 'PENDING VERIFICATION'}
                                         </div>
                                         <div className="text-[10px] text-gray-500">Issued by Election Commission</div>
                                     </div>

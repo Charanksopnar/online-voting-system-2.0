@@ -50,6 +50,12 @@ const mapProfileToUser = (profile: any): User => ({
   epicNumber: profile.epic_number,
   epicDocUrl: profile.epic_doc_url,
 
+  // Electoral Roll Verification
+  electoralRollVerified: profile.electoral_roll_verified,
+  electoralRollMatchId: profile.electoral_roll_match_id,
+  manualVerifyRequested: profile.manual_verify_requested,
+  manualVerifyRequestedAt: profile.manual_verify_requested_at,
+
   created_at: profile.created_at
 });
 
@@ -130,6 +136,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
         if (payload.new.is_blocked && !payload.old.is_blocked) {
           addNotification('ERROR', 'Account Blocked', payload.new.block_reason || 'Contact Admin');
+        }
+
+        // Electoral roll verification status change
+        if (payload.new.electoral_roll_verified && !payload.old.electoral_roll_verified) {
+          addNotification('SUCCESS', 'Electoral Roll Verified', 'Your details have been verified against the official voter list. You can now vote!');
         }
       })
       .subscribe();

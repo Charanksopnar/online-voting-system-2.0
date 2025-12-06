@@ -60,31 +60,45 @@ async function getEmbeddingFromDocker(base64Frame: string): Promise<number[]> {
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-            img: `data:image/jpeg;base64,${base64Frame}`,
+            img_path: `data:image/jpeg;base64,${base64Frame}`,
             model_name: 'Facenet',
             detector_backend: 'opencv',
+            enforce_detection: false, // Allow processing even if face detection is uncertain
         }),
     });
 
     const data = await response.json();
 
+    console.log('DeepFace /represent response:', JSON.stringify(data, null, 2));
+
     if (!response.ok) {
-        throw new Error(data?.message || 'DeepFace /represent request failed');
+        const errorMsg = data?.error || data?.message || 'DeepFace /represent request failed';
+        throw new Error(errorMsg);
     }
 
     let embedding: number[] | undefined;
 
-    if (Array.isArray(data)) {
+    // DeepFace API returns: { results: [ { embedding: [...], ... } ] }
+    if (data.results && Array.isArray(data.results) && data.results.length > 0) {
+        const first = data.results[0];
+        if (first && Array.isArray(first.embedding)) {
+            embedding = first.embedding;
+        }
+    }
+    // Fallback: direct array format (older API versions)
+    else if (Array.isArray(data)) {
         const first = data[0];
         if (first && Array.isArray(first.embedding)) {
             embedding = first.embedding;
         }
-    } else if (Array.isArray(data.embedding)) {
+    }
+    // Fallback: flat embedding format
+    else if (Array.isArray(data.embedding)) {
         embedding = data.embedding;
     }
 
     if (!embedding || embedding.length === 0) {
-        throw new Error('Could not extract face embedding from DeepFace response');
+        throw new Error(`Could not extract face embedding from DeepFace response. Response structure: ${JSON.stringify(Object.keys(data))}`);
     }
 
     return embedding;

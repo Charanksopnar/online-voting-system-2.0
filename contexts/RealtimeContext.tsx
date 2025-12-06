@@ -24,7 +24,8 @@ interface RealtimeContextType {
   deleteCandidate: (id: string) => void;
 
   addElection: (election: Election) => void;
-  stopElection: (id: string) => void; // New
+  stopElection: (id: string) => void;
+  updateCandidate: (id: string, updates: Partial<Candidate>) => Promise<void>;
 
   castVote: (electionId: string, candidateId: string, voterId: string, riskScore?: number) => void;
   reportFraud: (alert: FraudAlert) => void;
@@ -94,18 +95,32 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
     created_at: p.created_at
   });
 
-  const mapElection = (e: any): Election => ({
-    id: e.id,
-    title: e.title,
-    description: e.description,
-    startDate: e.start_date,
-    endDate: e.end_date,
-    status: e.status,
-    region: e.region,
-    regionState: e.region_state,
-    regionDistrict: e.region_district,
-    candidates: []
-  });
+  // Helper to compute correct election status based on current time
+  const computeElectionStatus = (startDate: string, endDate: string, currentStatus: string): 'UPCOMING' | 'ACTIVE' | 'ENDED' => {
+    if (currentStatus === 'ENDED') return 'ENDED'; // Manual stop takes precedence
+    const now = new Date();
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    if (now >= end) return 'ENDED';
+    if (now >= start) return 'ACTIVE';
+    return 'UPCOMING';
+  };
+
+  const mapElection = (e: any): Election => {
+    const computedStatus = computeElectionStatus(e.start_date, e.end_date, e.status);
+    return {
+      id: e.id,
+      title: e.title,
+      description: e.description,
+      startDate: e.start_date,
+      endDate: e.end_date,
+      status: computedStatus,
+      region: e.region,
+      regionState: e.region_state,
+      regionDistrict: e.region_district,
+      candidates: []
+    };
+  };
 
   const mapCandidate = (c: any): Candidate => ({
     id: c.id,
@@ -232,6 +247,35 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
     })));
   }, [candidates]);
 
+  // --- PERIODIC ELECTION STATUS UPDATE ---
+  useEffect(() => {
+    const updateElectionStatuses = async () => {
+      const updates: { id: string; newStatus: 'UPCOMING' | 'ACTIVE' | 'ENDED' }[] = [];
+
+      setElections(prev => prev.map(e => {
+        const computedStatus = computeElectionStatus(e.startDate, e.endDate, e.status);
+        if (computedStatus !== e.status) {
+          updates.push({ id: e.id, newStatus: computedStatus });
+          return { ...e, status: computedStatus };
+        }
+        return e;
+      }));
+
+      // Sync changed statuses to database
+      for (const update of updates) {
+        await supabase.from('elections').update({ status: update.newStatus }).eq('id', update.id);
+      }
+    };
+
+    // Initial check
+    updateElectionStatuses();
+
+    // Periodic check every 30 seconds
+    const interval = setInterval(updateElectionStatuses, 30000);
+
+    return () => clearInterval(interval);
+  }, [elections.length]);
+
   // --- ACTIONS ---
 
   const registerVoter = async (voter: User) => { };
@@ -279,6 +323,27 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
   const deleteCandidate = async (id: string) => {
     const { error } = await supabase.from('candidates').delete().eq('id', id);
     if (error) addNotification('ERROR', 'Delete Failed', error.message);
+  };
+
+  const updateCandidate = async (id: string, updates: Partial<Candidate>) => {
+    const dbUpdates: any = {};
+    if (updates.name !== undefined) dbUpdates.name = updates.name;
+    if (updates.party !== undefined) dbUpdates.party = updates.party;
+    if (updates.age !== undefined) dbUpdates.age = updates.age;
+    if (updates.manifesto !== undefined) dbUpdates.manifesto = updates.manifesto;
+    if (updates.photoUrl !== undefined) dbUpdates.photo_url = updates.photoUrl;
+    if (updates.partySymbolUrl !== undefined) dbUpdates.party_symbol_url = updates.partySymbolUrl;
+    if (updates.state !== undefined) dbUpdates.state = updates.state;
+    if (updates.district !== undefined) dbUpdates.district = updates.district;
+    if (updates.electionId !== undefined) dbUpdates.election_id = updates.electionId;
+
+    setCandidates(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
+    const { error } = await supabase.from('candidates').update(dbUpdates).eq('id', id);
+    if (error) {
+      addNotification('ERROR', 'Update Failed', error.message);
+    } else {
+      addNotification('SUCCESS', 'Candidate Updated', 'Changes saved successfully.');
+    }
   };
 
   const addElection = async (election: Election) => {
@@ -412,7 +477,7 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
     <RealtimeContext.Provider value={{
       voters, candidates, elections, votes, fraudAlerts, regions, officialVoters,
       registerVoter, updateVoterStatus, blockVoter, unblockVoter, deleteVoter,
-      addCandidate, deleteCandidate, addElection, stopElection, castVote, reportFraud, addRegion,
+      addCandidate, deleteCandidate, updateCandidate, addElection, stopElection, castVote, reportFraud, addRegion,
       addOfficialVoters, deleteOfficialVoter, updateOfficialVoter, crossVerifyElectoralRoll, requestManualVerification
     }}>
       {children}

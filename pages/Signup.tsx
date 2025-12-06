@@ -216,9 +216,34 @@ export const Signup = () => {
             addNotification('ERROR', 'Required', 'Biometric Face Capture is mandatory.');
             return;
         }
+        if (!faceBase64) {
+            addNotification('ERROR', 'Required', 'Face image data is missing. Please recapture your face.');
+            return;
+        }
 
         try {
             setLoading(true);
+
+            // Extract face embeddings FIRST before any other operations
+            // This is critical for voting functionality
+            let faceEmbeddings: number[] | null = null;
+            try {
+                addNotification('INFO', 'Processing Biometrics', 'Extracting face verification data...');
+                faceEmbeddings = await getEmbeddingForBase64Image(faceBase64);
+
+                if (!faceEmbeddings || faceEmbeddings.length === 0) {
+                    throw new Error('Face embedding extraction returned empty data.');
+                }
+
+                addNotification('SUCCESS', 'Biometric Success', `Face data extracted successfully (${faceEmbeddings.length} dimensions).`);
+            } catch (err: any) {
+                console.error('Face embedding extraction during signup failed:', err);
+                addNotification('ERROR', 'Biometric Service Error',
+                    `${err?.message || 'Face service is unavailable.'} Make sure the DeepFace Docker container is running on port 5000.`);
+                setLoading(false);
+                return; // Block registration if embeddings fail
+            }
+
             const tempId = Date.now().toString();
 
             let kycUrl = '';
@@ -238,17 +263,6 @@ export const Signup = () => {
             const facePath = `${tempId}_face.jpg`;
             const faceUrl = await uploadToStorage(faceImageBlob, 'faces', facePath);
 
-            // Best-effort: compute face embeddings during registration using DeepFace Docker
-            let faceEmbeddings: number[] | null = null;
-            if (faceBase64) {
-                try {
-                    faceEmbeddings = await getEmbeddingForBase64Image(faceBase64);
-                } catch (err: any) {
-                    console.error('Face embedding extraction during signup failed:', err);
-                    addNotification('ERROR', 'Biometric Service Error', err?.message || 'Face service is unavailable. Admin may need to approve you manually.');
-                }
-            }
-
             await signUp(formData.email, formData.firstName, formData.lastName, {
                 ...formData,
                 email: formData.email,
@@ -260,20 +274,27 @@ export const Signup = () => {
                 idType: 'AADHAAR'
             });
 
-            // Persist embeddings into profiles table if available
+            // Persist embeddings into profiles table
             if (faceEmbeddings && faceEmbeddings.length > 0) {
                 const { data } = await supabase.auth.getUser();
                 const currentUser = data?.user;
                 if (currentUser) {
-                    await supabase
+                    const { error: updateError } = await supabase
                         .from('profiles')
                         .update({
                             face_embeddings: faceEmbeddings,
+                            liveness_verified: true
                         })
                         .eq('id', currentUser.id);
+
+                    if (updateError) {
+                        console.error('Failed to save face embeddings:', updateError);
+                        addNotification('WARNING', 'Partial Success', 'Account created but face data sync failed. Contact admin.');
+                    }
                 }
             }
 
+            addNotification('SUCCESS', 'Registration Complete', 'Your secure voter profile has been created with biometric data.');
             navigate('/User');
         } catch (err: any) {
             addNotification('ERROR', 'Registration Failed', err.message);
