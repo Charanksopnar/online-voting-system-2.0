@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { User, Candidate, Election, VoteTransaction, UserRole, VerificationStatus, FraudAlert, Region } from '../types';
+import { User, Candidate, Election, VoteTransaction, UserRole, VerificationStatus, FraudAlert, Region, OfficialVoter } from '../types';
 import { supabase } from '../supabase';
 import { useNotification } from './NotificationContext';
 
@@ -11,6 +11,7 @@ interface RealtimeContextType {
   votes: VoteTransaction[];
   fraudAlerts: FraudAlert[];
   regions: Region[];
+  officialVoters: OfficialVoter[];
 
   // Actions
   registerVoter: (voter: User) => void;
@@ -29,6 +30,13 @@ interface RealtimeContextType {
   reportFraud: (alert: FraudAlert) => void;
 
   addRegion: (region: Region) => void;
+
+  // Official Voter Lists
+  addOfficialVoters: (voters: OfficialVoter[]) => Promise<void>;
+  deleteOfficialVoter: (id: string) => Promise<void>;
+  updateOfficialVoter: (voter: OfficialVoter) => Promise<void>;
+  crossVerifyElectoralRoll: (userId: string, matchId: string) => Promise<void>;
+  requestManualVerification: (userId: string) => Promise<void>;
 }
 
 const RealtimeContext = createContext<RealtimeContextType | undefined>(undefined);
@@ -48,6 +56,7 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
   const [votes, setVotes] = useState<VoteTransaction[]>([]);
   const [fraudAlerts, setFraudAlerts] = useState<FraudAlert[]>([]);
   const [regions, setRegions] = useState<Region[]>([]);
+  const [officialVoters, setOfficialVoters] = useState<OfficialVoter[]>([]);
 
   // --- DATA MAPPING HELPERS ---
   const mapProfileToUser = (p: any): User => ({
@@ -76,6 +85,12 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
     epicNumber: p.epic_number,
     epicDocUrl: p.epic_doc_url,
 
+    // Electoral Roll Verification
+    electoralRollVerified: p.electoral_roll_verified,
+    electoralRollMatchId: p.electoral_roll_match_id,
+    manualVerifyRequested: p.manual_verify_requested,
+    manualVerifyRequestedAt: p.manual_verify_requested_at,
+
     created_at: p.created_at
   });
 
@@ -87,6 +102,8 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
     endDate: e.end_date,
     status: e.status,
     region: e.region,
+    regionState: e.region_state,
+    regionDistrict: e.region_district,
     candidates: []
   });
 
@@ -99,7 +116,9 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
     photoUrl: c.photo_url,
     manifesto: c.manifesto,
     age: c.age,
-    votes: c.votes_count
+    votes: c.votes_count,
+    state: c.state,
+    district: c.district
   });
 
   const mapVote = (v: any): VoteTransaction => ({
@@ -118,6 +137,21 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
     type: r.type,
     parentRegionId: r.parent_region_id,
     voterCount: r.voter_count
+  });
+
+  const mapOfficialVoter = (o: any): OfficialVoter => ({
+    id: o.id,
+    aadhaarNumber: o.aadhaar_number,
+    epicNumber: o.epic_number,
+    fullName: o.full_name,
+    fatherName: o.father_name,
+    age: o.age,
+    gender: o.gender,
+    state: o.address_state,
+    district: o.address_district,
+    city: o.address_city,
+    pollingBooth: o.polling_booth,
+    createdAt: o.created_at
   });
 
   // --- INITIAL FETCH & SUBSCRIPTION ---
@@ -149,6 +183,9 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
         riskLevel: f.risk_level,
         details: f.details
       })));
+
+      const { data: oData } = await supabase.from('official_voter_lists').select('*');
+      if (oData) setOfficialVoters(oData.map(mapOfficialVoter));
     };
     fetchData();
 
@@ -174,6 +211,11 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
           setVotes(prev => [...prev, newVote]);
           setCandidates(prev => prev.map(c => c.id === newVote.candidateId ? { ...c, votes: c.votes + 1 } : c));
         }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'official_voter_lists' }, payload => {
+        if (payload.eventType === 'INSERT') setOfficialVoters(prev => [...prev, mapOfficialVoter(payload.new)]);
+        if (payload.eventType === 'UPDATE') setOfficialVoters(prev => prev.map(o => o.id === payload.new.id ? mapOfficialVoter(payload.new) : o));
+        if (payload.eventType === 'DELETE') setOfficialVoters(prev => prev.filter(o => o.id !== payload.old.id));
       })
       .subscribe();
 
@@ -227,7 +269,9 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
       photo_url: candidate.photoUrl,
       manifesto: candidate.manifesto,
       age: candidate.age,
-      votes_count: 0
+      votes_count: 0,
+      state: candidate.state,
+      district: candidate.district
     }]);
     if (error) addNotification('ERROR', 'Candidate Add Failed', error.message);
   };
@@ -245,7 +289,9 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
       start_date: election.startDate,
       end_date: election.endDate,
       status: election.status,
-      region: election.region
+      region: election.region,
+      region_state: election.regionState,
+      region_district: election.regionDistrict
     }]);
     if (error) addNotification('ERROR', 'Election Create Failed', error.message);
   };
@@ -299,11 +345,75 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
     }]);
   };
 
+  // --- OFFICIAL VOTER LISTS ACTIONS ---
+
+  const addOfficialVoters = async (votersData: OfficialVoter[]) => {
+    const insertData = votersData.map(v => ({
+      aadhaar_number: v.aadhaarNumber,
+      epic_number: v.epicNumber,
+      full_name: v.fullName,
+      father_name: v.fatherName,
+      age: v.age,
+      gender: v.gender,
+      address_state: v.state,
+      address_district: v.district,
+      address_city: v.city,
+      polling_booth: v.pollingBooth
+    }));
+    const { error } = await supabase.from('official_voter_lists').insert(insertData);
+    if (error) addNotification('ERROR', 'Upload Failed', error.message);
+    else addNotification('SUCCESS', 'Upload Complete', `${votersData.length} official voter records added.`);
+  };
+
+  const deleteOfficialVoter = async (id: string) => {
+    const { error } = await supabase.from('official_voter_lists').delete().eq('id', id);
+    if (error) addNotification('ERROR', 'Delete Failed', error.message);
+  };
+
+  const updateOfficialVoter = async (voter: OfficialVoter) => {
+    const { error } = await supabase.from('official_voter_lists').update({
+      aadhaar_number: voter.aadhaarNumber,
+      epic_number: voter.epicNumber,
+      full_name: voter.fullName,
+      father_name: voter.fatherName,
+      age: voter.age,
+      gender: voter.gender,
+      address_state: voter.state,
+      address_district: voter.district,
+      address_city: voter.city,
+      polling_booth: voter.pollingBooth
+    }).eq('id', voter.id);
+    if (error) addNotification('ERROR', 'Update Failed', error.message);
+    else addNotification('SUCCESS', 'Updated', 'Official voter record updated.');
+  };
+
+  const crossVerifyElectoralRoll = async (userId: string, matchId: string) => {
+    setVoters(prev => prev.map(v => v.id === userId ? { ...v, electoralRollVerified: true, electoralRollMatchId: matchId, manualVerifyRequested: false } : v));
+    const { error } = await supabase.from('profiles').update({
+      electoral_roll_verified: true,
+      electoral_roll_match_id: matchId,
+      manual_verify_requested: false
+    }).eq('id', userId);
+    if (error) addNotification('ERROR', 'Verification Failed', error.message);
+    else addNotification('SUCCESS', 'Verified', 'User is now verified against electoral roll.');
+  };
+
+  const requestManualVerification = async (userId: string) => {
+    setVoters(prev => prev.map(v => v.id === userId ? { ...v, manualVerifyRequested: true, manualVerifyRequestedAt: new Date().toISOString() } : v));
+    const { error } = await supabase.from('profiles').update({
+      manual_verify_requested: true,
+      manual_verify_requested_at: new Date().toISOString()
+    }).eq('id', userId);
+    if (error) addNotification('ERROR', 'Request Failed', error.message);
+    else addNotification('INFO', 'Request Sent', 'Manual verification request sent to admin.');
+  };
+
   return (
     <RealtimeContext.Provider value={{
-      voters, candidates, elections, votes, fraudAlerts, regions,
+      voters, candidates, elections, votes, fraudAlerts, regions, officialVoters,
       registerVoter, updateVoterStatus, blockVoter, unblockVoter, deleteVoter,
-      addCandidate, deleteCandidate, addElection, stopElection, castVote, reportFraud, addRegion
+      addCandidate, deleteCandidate, addElection, stopElection, castVote, reportFraud, addRegion,
+      addOfficialVoters, deleteOfficialVoter, updateOfficialVoter, crossVerifyElectoralRoll, requestManualVerification
     }}>
       {children}
     </RealtimeContext.Provider>

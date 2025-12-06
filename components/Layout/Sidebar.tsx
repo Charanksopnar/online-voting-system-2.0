@@ -25,6 +25,7 @@ export const Sidebar = () => {
     { icon: <Map size={20} />, label: 'Region Election', path: '/admin/region-election' },
     { icon: <KycReviewIcon size={20} />, label: 'KYC Review', path: '/admin/kyc-review' },
     { icon: <BarChartIcon size={20} />, label: 'Visualizations', path: '/admin/visualizations' },
+    { icon: <FileText size={20} />, label: 'Voter Lists Verify', path: '/admin/voter-lists' },
     { icon: <Activity size={20} />, label: 'Audit Logs', path: '/admin/logs' },
   ];
 

@@ -1,10 +1,11 @@
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useRealtime } from '../../contexts/RealtimeContext';
 import { useNotification } from '../../contexts/NotificationContext';
+import { INDIAN_STATES_DISTRICTS } from '../../data/indianStatesDistricts';
 import { supabase } from '../../supabase';
-import { Upload, Save, ArrowLeft } from 'lucide-react';
+import { Upload, Save, ArrowLeft, MapPin, Info } from 'lucide-react';
 
 export const AddCandidate = () => {
     const { addCandidate, elections } = useRealtime();
@@ -13,10 +14,43 @@ export const AddCandidate = () => {
 
     const activeElections = elections.filter(e => e.status !== 'ENDED');
 
-    const [form, setForm] = useState({ name: '', party: '', age: '', bio: '', electionId: '' });
+    const [form, setForm] = useState({
+        name: '',
+        party: '',
+        age: '',
+        bio: '',
+        electionId: '',
+        state: '',
+        district: ''
+    });
     const [candidateImg, setCandidateImg] = useState<File | null>(null);
     const [partyImg, setPartyImg] = useState<File | null>(null);
     const [loading, setLoading] = useState(false);
+
+    // Get selected election details
+    const selectedElection = useMemo(() => {
+        return elections.find(e => e.id === form.electionId);
+    }, [form.electionId, elections]);
+
+    // Determine if we need to show location fields
+    const showLocationFields = selectedElection && selectedElection.region !== 'National';
+    const requireDistrict = selectedElection?.region === 'District';
+
+    // Get districts for selected state
+    const districtsForState = useMemo(() => {
+        return form.state ? INDIAN_STATES_DISTRICTS[form.state] || [] : [];
+    }, [form.state]);
+
+    // Auto-populate state/district from election when election is selected
+    const handleElectionChange = (electionId: string) => {
+        const election = elections.find(e => e.id === electionId);
+        setForm({
+            ...form,
+            electionId,
+            state: election?.regionState || '',
+            district: election?.regionDistrict || ''
+        });
+    };
 
     const handleUpload = async (file: File, bucket: string) => {
         const fileName = `${Date.now()}_${file.name.replace(/[^a-z0-9.]/gi, '_').toLowerCase()}`;
@@ -30,6 +64,14 @@ export const AddCandidate = () => {
         e.preventDefault();
         if (!form.electionId) return addNotification('ERROR', 'Required', 'Select an election');
         if (!partyImg) return addNotification('ERROR', 'Required', 'Upload Party Symbol');
+
+        // Validate location for non-national elections
+        if (showLocationFields && !form.state) {
+            return addNotification('ERROR', 'Required', 'Select a state');
+        }
+        if (requireDistrict && !form.district) {
+            return addNotification('ERROR', 'Required', 'Select a district');
+        }
 
         setLoading(true);
         try {
@@ -48,7 +90,9 @@ export const AddCandidate = () => {
                 partySymbolUrl: partyUrl,
                 photoUrl: candidatePhotoUrl,
                 electionId: form.electionId,
-                votes: 0
+                votes: 0,
+                state: form.state || undefined,
+                district: form.district || undefined
             });
 
             addNotification('SUCCESS', 'Success', 'Candidate Created');
@@ -75,18 +119,38 @@ export const AddCandidate = () => {
             <div className="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 p-8 rounded-2xl shadow-sm max-w-4xl">
                 <form onSubmit={handleSubmit} className="space-y-8">
 
+                    {/* Election Selection */}
                     <div className="bg-slate-50 dark:bg-slate-900/50 p-6 rounded-xl border border-slate-100 dark:border-slate-700">
                         <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Select Election</label>
                         <select
                             className="input-standard"
                             value={form.electionId}
-                            onChange={e => setForm({ ...form, electionId: e.target.value })}
+                            onChange={e => handleElectionChange(e.target.value)}
                         >
                             <option value="">-- Select Active Election --</option>
-                            {activeElections.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
+                            {activeElections.map(e => (
+                                <option key={e.id} value={e.id}>
+                                    {e.title} ({e.region}{e.regionState ? ` - ${e.regionState}` : ''}{e.regionDistrict ? `, ${e.regionDistrict}` : ''})
+                                </option>
+                            ))}
                         </select>
+
+                        {/* Show election location info */}
+                        {selectedElection && (
+                            <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-100 dark:border-blue-800">
+                                <div className="flex items-center gap-2 text-sm text-blue-700 dark:text-blue-300">
+                                    <MapPin size={16} />
+                                    <span className="font-medium">
+                                        {selectedElection.region === 'National' && 'This is a National election - candidate will be visible to all voters'}
+                                        {selectedElection.region === 'State' && `This is a State election for ${selectedElection.regionState} - candidate will be visible to voters from this state`}
+                                        {selectedElection.region === 'District' && `This is a District election for ${selectedElection.regionDistrict}, ${selectedElection.regionState} - candidate will be visible to voters from this district`}
+                                    </span>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
+                    {/* Candidate Details */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
                             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Candidate Name</label>
@@ -101,6 +165,50 @@ export const AddCandidate = () => {
                             <input className="input-standard" placeholder="Party Name" value={form.party} onChange={e => setForm({ ...form, party: e.target.value })} />
                         </div>
                     </div>
+
+                    {/* Location Fields - Only show for non-national elections */}
+                    {showLocationFields && (
+                        <div className="bg-amber-50 dark:bg-amber-900/20 p-6 rounded-xl border border-amber-200 dark:border-amber-800">
+                            <div className="flex items-center gap-2 mb-4">
+                                <Info size={18} className="text-amber-600" />
+                                <h4 className="font-bold text-amber-800 dark:text-amber-300">Candidate Location Assignment</h4>
+                            </div>
+                            <p className="text-sm text-amber-700 dark:text-amber-400 mb-4">
+                                This candidate will only be shown to voters from the selected location.
+                            </p>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">State *</label>
+                                    <select
+                                        className="input-standard"
+                                        value={form.state}
+                                        onChange={e => setForm({ ...form, state: e.target.value, district: '' })}
+                                    >
+                                        <option value="">-- Select State --</option>
+                                        {Object.keys(INDIAN_STATES_DISTRICTS).map(state => (
+                                            <option key={state} value={state}>{state}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                {requireDistrict && (
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">District *</label>
+                                        <select
+                                            className="input-standard"
+                                            value={form.district}
+                                            onChange={e => setForm({ ...form, district: e.target.value })}
+                                            disabled={!form.state}
+                                        >
+                                            <option value="">-- Select District --</option>
+                                            {districtsForState.map(d => (
+                                                <option key={d} value={d}>{d}</option>
+                                            ))}
+                                        </select>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
 
                     <div>
                         <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Bio / Manifesto</label>

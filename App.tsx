@@ -26,14 +26,15 @@ import { RegionConfiguration } from './pages/admin/RegionConfiguration';
 import { InvalidVotes } from './pages/admin/InvalidVotes';
 import { AdminNotifications } from './pages/admin/AdminNotifications';
 import { AdminVisualizations } from './pages/admin/AdminVisualizations';
+import { VoterListsVerification } from './pages/admin/VoterListsVerification';
+import { CalendarPage } from './pages/admin/CalendarPage';
+import { UpcomingElections } from './pages/admin/UpcomingElections';
+import { AuditLogs } from './pages/admin/AuditLogs';
 import { Diagnostic } from './pages/common/Diagnostic';
 
 const AdminLogin = () => {
   return <Login adminMode={true} />;
 };
-
-const CalendarPage = () => <div className="text-gray-500">Calendar Module Coming Soon</div>;
-const UpcomingPage = () => <div className="text-gray-500">Detailed Elections List Coming Soon</div>;
 
 // Layout for Public/User pages that use the top Navbar
 const StandardLayout = () => (
@@ -90,11 +91,12 @@ export default function App() {
                   <Route path="/admin/region-election" element={<RegionConfiguration />} />
                   <Route path="/admin/kyc-review" element={<KycReview />} />
                   <Route path="/admin/visualizations" element={<AdminVisualizations />} />
+                  <Route path="/admin/voter-lists" element={<VoterListsVerification />} />
                   <Route path="/invalidVotes" element={<InvalidVotes />} />
                   <Route path="/admin/notifications" element={<AdminNotifications />} />
                   <Route path="/calendar" element={<CalendarPage />} />
-                  <Route path="/upcoming" element={<UpcomingPage />} />
-                  <Route path="/admin/logs" element={<div className="text-gray-500">Audit Logs Module</div>} />
+                  <Route path="/upcoming" element={<UpcomingElections />} />
+                  <Route path="/admin/logs" element={<AuditLogs />} />
                 </Route>
 
                 {/* Fallbacks */}

@@ -44,6 +44,26 @@ export interface User {
   isBlocked: boolean;
   blockReason?: string;
   created_at?: string;
+  // Electoral Roll Verification
+  electoralRollVerified?: boolean;
+  electoralRollMatchId?: string;
+  manualVerifyRequested?: boolean;
+  manualVerifyRequestedAt?: string;
+}
+
+export interface OfficialVoter {
+  id: string;
+  aadhaarNumber?: string;
+  epicNumber?: string;
+  fullName: string;
+  fatherName?: string;
+  age?: number;
+  gender?: string;
+  state?: string;
+  district?: string;
+  city?: string;
+  pollingBooth?: string;
+  createdAt?: string;
 }
 
 export interface Election {
@@ -55,6 +75,8 @@ export interface Election {
   status: 'UPCOMING' | 'ACTIVE' | 'ENDED';
   candidates: Candidate[];
   region?: string;
+  regionState?: string;
+  regionDistrict?: string;
 }
 
 export interface Candidate {
@@ -67,6 +89,8 @@ export interface Candidate {
   votes: number;
   age?: number;
   electionId?: string;
+  state?: string;
+  district?: string;
 }
 
 export interface Notification {

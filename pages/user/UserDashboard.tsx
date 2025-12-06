@@ -2,11 +2,11 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRealtime } from '../../contexts/RealtimeContext';
-import { Shield, MapPin, CheckCircle, Fingerprint, AlertTriangle, Clock, Calendar, Award } from 'lucide-react';
+import { Shield, MapPin, CheckCircle, Fingerprint, AlertTriangle, Clock, Calendar, Award, AlertCircle, Send } from 'lucide-react';
 
 export const UserDashboard = () => {
     const { user } = useAuth();
-    const { elections, candidates, votes } = useRealtime();
+    const { elections, candidates, votes, requestManualVerification } = useRealtime();
     const navigate = useNavigate();
 
     const [confirmModal, setConfirmModal] = useState<{
@@ -29,18 +29,42 @@ export const UserDashboard = () => {
         ? Math.round((userVotes.length / elections.filter(e => e.status !== 'UPCOMING').length) * 100)
         : 0;
 
-    // Filter Logic
+    // Filter Logic - Location-based election filtering
     const relevantElections = elections.filter(e => {
         if (e.status === 'ENDED') return false;
+
+        // National elections are visible to everyone
         if (!e.region || e.region === 'National') return true;
-        if (user?.address) return e.region === user.address.state || e.region === user.address.district;
+
+        // State elections - show if user's state matches
+        if (e.region === 'State' && e.regionState) {
+            return user?.address?.state === e.regionState;
+        }
+
+        // District elections - show if user's district matches
+        if (e.region === 'District' && e.regionDistrict) {
+            return user?.address?.state === e.regionState && user?.address?.district === e.regionDistrict;
+        }
+
         return false;
     });
 
     const endedElections = elections.filter(e => {
         if (e.status !== 'ENDED') return false;
+
+        // National elections are visible to everyone
         if (!e.region || e.region === 'National') return true;
-        if (user?.address) return e.region === user.address.state || e.region === user.address.district;
+
+        // State elections - show if user's state matches
+        if (e.region === 'State' && e.regionState) {
+            return user?.address?.state === e.regionState;
+        }
+
+        // District elections - show if user's district matches
+        if (e.region === 'District' && e.regionDistrict) {
+            return user?.address?.state === e.regionState && user?.address?.district === e.regionDistrict;
+        }
+
         return false;
     });
 
@@ -160,8 +184,8 @@ export const UserDashboard = () => {
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
 
-                    {/* Left Column: Digital ID */}
-                    <div className="space-y-8">
+                    {/* Left Column: Digital ID & Electoral Roll Status */}
+                    <div className="space-y-6">
 
                         {/* Digital ID Card */}
                         <div className="perspective-1000">
@@ -221,6 +245,55 @@ export const UserDashboard = () => {
                                         <div className="text-[10px] text-gray-500">Issued by Election Commission</div>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+
+                        {/* Electoral Roll Status Card */}
+                        <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
+                            <div className="p-5">
+                                <h3 className="text-sm font-bold text-gray-600 dark:text-gray-400 uppercase tracking-wide mb-4">Electoral Roll Status</h3>
+
+                                {user?.electoralRollVerified ? (
+                                    <div className="flex items-center gap-3 p-4 bg-green-50 dark:bg-green-900/20 rounded-xl border border-green-200 dark:border-green-800">
+                                        <div className="p-2 bg-green-100 dark:bg-green-900/40 rounded-full">
+                                            <CheckCircle className="text-green-600 dark:text-green-400" size={24} />
+                                        </div>
+                                        <div>
+                                            <div className="font-bold text-green-800 dark:text-green-300">Verified in Electoral Roll</div>
+                                            <div className="text-sm text-green-600 dark:text-green-400">You are eligible to vote in elections</div>
+                                        </div>
+                                    </div>
+                                ) : user?.manualVerifyRequested ? (
+                                    <div className="flex items-center gap-3 p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-xl border border-yellow-200 dark:border-yellow-800">
+                                        <div className="p-2 bg-yellow-100 dark:bg-yellow-900/40 rounded-full">
+                                            <Clock className="text-yellow-600 dark:text-yellow-400" size={24} />
+                                        </div>
+                                        <div>
+                                            <div className="font-bold text-yellow-800 dark:text-yellow-300">Manual Verification Pending</div>
+                                            <div className="text-sm text-yellow-600 dark:text-yellow-400">Admin is verifying your details. This may take some time.</div>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-4">
+                                        <div className="flex items-center gap-3 p-4 bg-red-50 dark:bg-red-900/20 rounded-xl border border-red-200 dark:border-red-800">
+                                            <div className="p-2 bg-red-100 dark:bg-red-900/40 rounded-full">
+                                                <AlertCircle className="text-red-600 dark:text-red-400" size={24} />
+                                            </div>
+                                            <div>
+                                                <div className="font-bold text-red-800 dark:text-red-300">Not Found in Electoral Roll</div>
+                                                <div className="text-sm text-red-600 dark:text-red-400">Your details could not be auto-verified against official voter lists.</div>
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={() => user?.id && requestManualVerification(user.id)}
+                                            className="w-full px-4 py-3 bg-gradient-to-r from-primary-600 to-secondary-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:from-primary-700 hover:to-secondary-700 transition shadow-lg shadow-primary-500/20"
+                                        >
+                                            <Send size={18} />
+                                            Request Manual Verification
+                                        </button>
+                                        <p className="text-xs text-gray-500 text-center">Takes time - Admin will cross-verify your Aadhaar/EPIC against government records</p>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>

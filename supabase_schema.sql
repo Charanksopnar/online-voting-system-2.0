@@ -53,6 +53,8 @@ alter table public.elections
   add column if not exists end_date timestamptz,
   add column if not exists status text default 'UPCOMING',
   add column if not exists region text,
+  add column if not exists region_state text,
+  add column if not exists region_district text,
   add column if not exists created_at timestamptz default timezone('utc'::text, now());
 
 -- CANDIDATES
@@ -69,6 +71,8 @@ alter table public.candidates
   add column if not exists manifesto text,
   add column if not exists votes_count int default 0,
   add column if not exists age int,
+  add column if not exists state text,
+  add column if not exists district text,
   add column if not exists created_at timestamptz default timezone('utc'::text, now());
 
 -- VOTES
@@ -118,6 +122,31 @@ alter table public.fraud_alerts
   add column if not exists risk_level text,
   add column if not exists details text,
   add column if not exists timestamp timestamptz default timezone('utc'::text, now());
+
+-- OFFICIAL VOTER LISTS (Government Electoral Roll Data)
+create table if not exists public.official_voter_lists (
+  id uuid primary key default uuid_generate_v4()
+);
+
+alter table public.official_voter_lists
+  add column if not exists aadhaar_number text,
+  add column if not exists epic_number text,
+  add column if not exists full_name text,
+  add column if not exists father_name text,
+  add column if not exists age int,
+  add column if not exists gender text,
+  add column if not exists address_state text,
+  add column if not exists address_district text,
+  add column if not exists address_city text,
+  add column if not exists polling_booth text,
+  add column if not exists created_at timestamptz default timezone('utc'::text, now());
+
+-- Add electoral roll verification columns to profiles
+alter table public.profiles
+  add column if not exists electoral_roll_verified boolean default false,
+  add column if not exists electoral_roll_match_id uuid,
+  add column if not exists manual_verify_requested boolean default false,
+  add column if not exists manual_verify_requested_at timestamptz;
 
 -- ============================================
 -- 2b. FOREIGN KEYS (idempotent via DO blocks)
@@ -214,6 +243,14 @@ create index if not exists idx_fraud_alerts_voter_election
 create index if not exists idx_regions_parent_region
   on public.regions (parent_region_id);
 
+-- Official Voter Lists indexes
+create index if not exists idx_official_voters_aadhaar
+  on public.official_voter_lists (aadhaar_number);
+create index if not exists idx_official_voters_epic
+  on public.official_voter_lists (epic_number);
+create index if not exists idx_official_voters_name
+  on public.official_voter_lists (lower(full_name));
+
 -- ============================================
 -- 4. ENABLE ROW LEVEL SECURITY
 -- ============================================
@@ -224,6 +261,7 @@ alter table public.candidates enable row level security;
 alter table public.votes enable row level security;
 alter table public.regions enable row level security;
 alter table public.fraud_alerts enable row level security;
+alter table public.official_voter_lists enable row level security;
 
 -- ============================================
 -- 5. RLS POLICIES (DROP + RECREATE)
@@ -333,6 +371,33 @@ create policy "System inserts alerts"
   on public.fraud_alerts
   for insert
   with check (true);
+
+-- OFFICIAL VOTER LISTS
+drop policy if exists "Official lists viewable by admins" on public.official_voter_lists;
+drop policy if exists "Admins manage official lists" on public.official_voter_lists;
+drop policy if exists "Admins update official lists" on public.official_voter_lists;
+drop policy if exists "Admins delete official lists" on public.official_voter_lists;
+
+create policy "Official lists viewable by admins"
+  on public.official_voter_lists
+  for select
+  using (true);
+
+create policy "Admins manage official lists"
+  on public.official_voter_lists
+  for insert
+  with check (auth.role() = 'authenticated');
+
+create policy "Admins update official lists"
+  on public.official_voter_lists
+  for update
+  using (auth.role() = 'authenticated')
+  with check (auth.role() = 'authenticated');
+
+create policy "Admins delete official lists"
+  on public.official_voter_lists
+  for delete
+  using (auth.role() = 'authenticated');
 
 -- ============================================
 -- 6. STORAGE BUCKETS & POLICIES

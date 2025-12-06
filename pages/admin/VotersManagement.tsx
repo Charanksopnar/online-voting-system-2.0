@@ -1,11 +1,11 @@
 import React, { useState, useMemo } from 'react';
 import { INDIAN_STATES_DISTRICTS } from '../../data/indianStatesDistricts';
 import { useRealtime } from '../../contexts/RealtimeContext';
-import { Search, Ban, Unlock, Trash2, Eye, FileText } from 'lucide-react';
+import { Search, Ban, Unlock, Trash2, Eye, FileText, CheckCircle, AlertCircle, Clock } from 'lucide-react';
 import { VerificationStatus } from '../../types';
 
 export const VotersManagement = () => {
-    const { voters, blockVoter, unblockVoter, deleteVoter, updateVoterStatus } = useRealtime();
+    const { voters, blockVoter, unblockVoter, deleteVoter, updateVoterStatus, officialVoters, crossVerifyElectoralRoll } = useRealtime();
 
     const [filterState, setFilterState] = useState('');
     const [filterDistrict, setFilterDistrict] = useState('');
@@ -37,6 +37,18 @@ export const VotersManagement = () => {
         setFilterDistrict('');
     };
 
+    // Find matching official voter for cross-verification
+    const getMatchingOfficialVoter = (voter: any) => {
+        return officialVoters.find(o =>
+            (voter.aadhaarNumber && o.aadhaarNumber === voter.aadhaarNumber) ||
+            (voter.epicNumber && o.epicNumber === voter.epicNumber)
+        );
+    };
+
+    const handleCrossVerify = async (voterId: string, officialVoterId: string) => {
+        await crossVerifyElectoralRoll(voterId, officialVoterId);
+    };
+
     return (
         <div className="min-h-screen">
             {/* Header */}
@@ -47,9 +59,9 @@ export const VotersManagement = () => {
                 </div>
                 <div className="flex flex-col md:flex-row gap-3 w-full md:w-auto">
                     {/* State Filter */}
-                    <select 
-                        value={filterState} 
-                        onChange={handleStateFilterChange} 
+                    <select
+                        value={filterState}
+                        onChange={handleStateFilterChange}
                         className="input-standard py-2.5 px-3 min-w-[150px] text-sm"
                     >
                         <option value="">All States</option>
@@ -59,9 +71,9 @@ export const VotersManagement = () => {
                     </select>
 
                     {/* District Filter */}
-                    <select 
-                        value={filterDistrict} 
-                        onChange={e => setFilterDistrict(e.target.value)} 
+                    <select
+                        value={filterDistrict}
+                        onChange={e => setFilterDistrict(e.target.value)}
                         disabled={!filterState}
                         className="input-standard py-2.5 px-3 min-w-[150px] text-sm disabled:opacity-50"
                     >
@@ -72,14 +84,14 @@ export const VotersManagement = () => {
                     </select>
 
                     <div className="relative flex-1 md:w-64">
-                        <input 
+                        <input
                             value={search}
                             onChange={e => setSearch(e.target.value)}
-                            type="text" 
-                            placeholder="Search voters..." 
+                            type="text"
+                            placeholder="Search voters..."
                             className="input-standard pl-10 w-full"
                         />
-                        <Search className="absolute left-3 top-2.5 text-slate-400" size={16}/>
+                        <Search className="absolute left-3 top-2.5 text-slate-400" size={16} />
                     </div>
                 </div>
             </div>
@@ -94,6 +106,7 @@ export const VotersManagement = () => {
                                 <th className="p-4">Contact</th>
                                 <th className="p-4">Address</th>
                                 <th className="p-4">Voter ID</th>
+                                <th className="p-4">Electoral Roll</th>
                                 <th className="p-4">Status</th>
                                 <th className="p-4 text-center">Actions</th>
                             </tr>
@@ -121,31 +134,63 @@ export const VotersManagement = () => {
                                         {voter.epicNumber && <span className="bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-1 rounded block">EPIC: {voter.epicNumber}</span>}
                                     </td>
                                     <td className="p-4">
-                                        <button 
+                                        {(() => {
+                                            const matchingOfficial = getMatchingOfficialVoter(voter);
+                                            if (voter.electoralRollVerified) {
+                                                return (
+                                                    <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-[10px] font-bold flex items-center gap-1 w-fit">
+                                                        <CheckCircle size={10} /> VERIFIED
+                                                    </span>
+                                                );
+                                            } else if (voter.manualVerifyRequested) {
+                                                return (
+                                                    <span className="px-2 py-1 bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 rounded-full text-[10px] font-bold flex items-center gap-1 w-fit">
+                                                        <Clock size={10} /> PENDING
+                                                    </span>
+                                                );
+                                            } else if (matchingOfficial) {
+                                                return (
+                                                    <button
+                                                        onClick={() => handleCrossVerify(voter.id, matchingOfficial.id)}
+                                                        className="px-2 py-1 bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 rounded-full text-[10px] font-bold flex items-center gap-1 hover:bg-primary-200 dark:hover:bg-primary-900/50 transition"
+                                                    >
+                                                        <CheckCircle size={10} /> Cross-Verify
+                                                    </button>
+                                                );
+                                            } else {
+                                                return (
+                                                    <span className="px-2 py-1 bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-full text-[10px] font-bold flex items-center gap-1 w-fit">
+                                                        <AlertCircle size={10} /> NOT FOUND
+                                                    </span>
+                                                );
+                                            }
+                                        })()}
+                                    </td>
+                                    <td className="p-4">
+                                        <button
                                             onClick={() => voter.isBlocked ? unblockVoter(voter.id) : blockVoter(voter.id, 'Admin Action')}
-                                            className={`px-3 py-1 rounded-full text-[10px] font-bold border flex items-center gap-1 w-fit transition-colors ${
-                                                voter.isBlocked 
-                                                ? 'border-red-200 bg-red-50 text-red-600 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400' 
-                                                : 'border-green-200 bg-green-50 text-green-600 dark:bg-green-900/20 dark:border-green-800 dark:text-green-400'
-                                            }`}
+                                            className={`px-3 py-1 rounded-full text-[10px] font-bold border flex items-center gap-1 w-fit transition-colors ${voter.isBlocked
+                                                    ? 'border-red-200 bg-red-50 text-red-600 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400'
+                                                    : 'border-green-200 bg-green-50 text-green-600 dark:bg-green-900/20 dark:border-green-800 dark:text-green-400'
+                                                }`}
                                         >
-                                            {voter.isBlocked ? <><Ban size={10}/> BLOCKED</> : <><Unlock size={10}/> ACTIVE</>}
+                                            {voter.isBlocked ? <><Ban size={10} /> BLOCKED</> : <><Unlock size={10} /> ACTIVE</>}
                                         </button>
                                     </td>
                                     <td className="p-4">
                                         <div className="flex justify-center gap-2">
                                             <button onClick={() => setSelectedVoter(voter)} className="p-2 rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition">
-                                                <Eye size={16}/>
+                                                <Eye size={16} />
                                             </button>
                                             <button onClick={() => deleteVoter(voter.id)} className="p-2 rounded-lg bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 transition">
-                                                <Trash2 size={16}/>
+                                                <Trash2 size={16} />
                                             </button>
                                         </div>
                                     </td>
                                 </tr>
                             ))}
                             {filtered.length === 0 && (
-                                <tr><td colSpan={7} className="p-8 text-center text-slate-500">No voters found.</td></tr>
+                                <tr><td colSpan={8} className="p-8 text-center text-slate-500">No voters found.</td></tr>
                             )}
                         </tbody>
                     </table>
@@ -155,7 +200,7 @@ export const VotersManagement = () => {
                 </div>
             </div>
 
-            {/* Detail Modal */ }
+            {/* Detail Modal */}
             {selectedVoter && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
                     <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-3xl w-full overflow-hidden border border-slate-200 dark:border-slate-700 max-h-[90vh] overflow-y-auto">
