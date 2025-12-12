@@ -59,26 +59,44 @@ export const VoterListsVerification = () => {
     const processData = (rawData: any[]): OfficialVoter[] => {
         console.log('Raw Data Preview:', rawData.slice(0, 2)); // Debug log
 
-        return rawData.map(row => {
-            // Normalize keys to lowercase and trim, remove BOM if present
+        // Keys we expect to find (for user feedback)
+        const foundKeys: Set<string> = new Set();
+        const requiredFields = ['name', 'aadhaar', 'epic'];
+
+        const validVoters = rawData.map(row => {
+            // Normalize keys to lowercase, remove BOM, collapse spaces
             const normalized: any = {};
+
             Object.keys(row).forEach(key => {
-                // Remove BOM and non-printable chars from key
-                const cleanKey = key.replace(/^\uFEFF/, '').trim().toLowerCase();
+                const cleanKey = key
+                    .replace(/^\uFEFF/, '') // Remove BOM
+                    .toLowerCase()
+                    .replace(/[_\-]/g, ' ') // Replace underscores/dashes with space
+                    .replace(/\s+/g, ' ') // Collapse multiple spaces
+                    .trim();
+
                 if (cleanKey) {
                     normalized[cleanKey] = row[key];
+                    foundKeys.add(cleanKey);
                 }
             });
 
-            console.log('Normalized Row:', normalized); // Debug log
+            // Inline UUID generator fallback
+            const uuid = () => {
+                if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+                return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                    return v.toString(16);
+                });
+            };
 
-            // Map to OfficialVoter schema with fuzzy matching
+            // Map to OfficialVoter schema with expanded fuzzy matching
             const voter: OfficialVoter = {
-                id: crypto.randomUUID(),
-                fullName: normalized['name'] || normalized['full name'] || normalized['voter name'] || normalized['candidate name'] || normalized['fullname'] || '',
-                fatherName: normalized['father'] || normalized['father name'] || normalized['relation name'] || normalized['guardian'] || normalized['fathername'] || '',
-                aadhaarNumber: String(normalized['aadhaar'] || normalized['aadhar'] || normalized['uid'] || normalized['aadhaar no'] || normalized['adhaarnumber'] || ''),
-                epicNumber: String(normalized['epic'] || normalized['epic no'] || normalized['voter id'] || normalized['id card'] || normalized['epicnumber'] || ''),
+                id: uuid(),
+                fullName: normalized['name'] || normalized['full name'] || normalized['voter name'] || normalized['candidate name'] || normalized['fullname'] || normalized['student name'] || '',
+                fatherName: normalized['father'] || normalized['father name'] || normalized['relation name'] || normalized['guardian'] || normalized['fathername'] || normalized['parent'] || '',
+                aadhaarNumber: String(normalized['aadhaar'] || normalized['aadhar'] || normalized['uid'] || normalized['aadhaar no'] || normalized['aadhaar number'] || normalized['adhaarnumber'] || normalized['uid no'] || ''),
+                epicNumber: String(normalized['epic'] || normalized['epic no'] || normalized['voter id'] || normalized['voter number'] || normalized['voterid'] || normalized['id card'] || normalized['epicnumber'] || normalized['epic number'] || normalized['voter id no'] || ''),
                 age: parseInt(normalized['age']) || undefined,
                 gender: normalized['gender'] || normalized['sex'] || '',
                 state: normalized['state'] || normalized['address state'] || '',
@@ -90,10 +108,24 @@ export const VoterListsVerification = () => {
                 createdAt: new Date().toISOString()
             };
 
-            // Filter out empty rows (must have at least a name or EPIC)
-            if (!voter.fullName && !voter.epicNumber) return null;
+            // STRICT FILTER: Must have at least a Name AND (Aadhaar OR EPIC)
+            // Loose filter previously allowed just one, but strict verification needs strong ID
+            if (!voter.fullName) return null;
+            if (!voter.aadhaarNumber && !voter.epicNumber) return null;
+
             return voter;
         }).filter(Boolean) as OfficialVoter[];
+
+        console.log('Found Column Headers:', Array.from(foundKeys)); // Debug info for user
+
+        // If no data found, check if we are missing critical columns
+        if (validVoters.length === 0 && rawData.length > 0) {
+            console.warn('No valid voters parsed. Checking for missing required columns...');
+            // We can't easily notify from here without passing setNotification, so we log it.
+            // The calling function will handle the 0 length warning.
+        }
+
+        return validVoters;
     };
 
     const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -152,7 +184,38 @@ export const VoterListsVerification = () => {
                         const wb = XLSX.read(bstr, { type: 'binary' });
                         const wsname = wb.SheetNames[0];
                         const ws = wb.Sheets[wsname];
-                        const data = XLSX.utils.sheet_to_json(ws);
+
+                        // Smart header detection: Read as array of arrays first
+                        const rawMatrix = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+
+                        let headerRowIndex = 0;
+                        let foundHeader = false;
+
+                        // Look for a row that looks like a header (contains 'name', 'aadhaar', 'epic', or 's.no')
+                        for (let i = 0; i < Math.min(20, rawMatrix.length); i++) {
+                            const row = rawMatrix[i];
+                            if (!row || !Array.isArray(row)) continue;
+
+                            const rowStr = row.join(' ').toLowerCase();
+                            if (rowStr.includes('name') || rowStr.includes('epic') || rowStr.includes('aadhaar')) {
+                                headerRowIndex = i;
+                                foundHeader = true;
+                                break;
+                            }
+                        }
+
+                        console.log(`Smart Excel Parser: Header found at index ${headerRowIndex}`);
+
+                        // Re-parse with the correct range
+                        // We can use the 'range' option in sheet_to_json, but modifying the range of the worksheet object is deeper.
+                        // Simpler: use the rawMatrix and map it ourselves or slice it.
+
+                        // Option A: Use sheet_to_json with range (safe)
+                        const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
+                        range.s.r = headerRowIndex; // Move start row to detected header
+                        const newRange = XLSX.utils.encode_range(range);
+                        const data = XLSX.utils.sheet_to_json(ws, { range: newRange });
+
                         console.log('Excel Raw Data:', data);
 
                         const parsedData = processData(data);
@@ -212,7 +275,17 @@ export const VoterListsVerification = () => {
     // Add new row
     const handleAddRow = async () => {
         if (!newRow.fullName && !newRow.aadhaarNumber && !newRow.epicNumber) return;
-        await addOfficialVoters([{ ...newRow, id: crypto.randomUUID() } as OfficialVoter]);
+
+        // inline UUID generator
+        const uuid = () => {
+            if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        };
+
+        await addOfficialVoters([{ ...newRow, id: uuid() } as OfficialVoter]);
         setNewRow({
             fullName: '', aadhaarNumber: '', epicNumber: '', fatherName: '',
             dob: '', age: undefined, gender: '', fullAddress: '', state: '', district: '', city: '', pollingBooth: ''

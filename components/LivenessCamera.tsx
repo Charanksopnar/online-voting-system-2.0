@@ -44,10 +44,22 @@ export const LivenessCamera: React.FC<LivenessCameraProps> = ({ onCapture, onCan
                     setProgress(20);
                 }, 1000);
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error('Camera access error:', error);
             setStep('ERROR');
-            setInstruction('Camera access denied. Please allow camera access.');
+
+            let msg = 'Camera access failed.';
+            if (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError') {
+                msg = 'Permission denied. Please allow camera access in your browser settings.';
+            } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+                msg = 'No camera found. Please connect a camera.';
+            } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+                msg = 'Camera is in use by another application. Please close other apps.';
+            } else if (window.isSecureContext === false) {
+                msg = 'Camera requires a secure connection (HTTPS).';
+            }
+
+            setInstruction(msg);
         }
     };
 
@@ -240,10 +252,10 @@ export const LivenessCamera: React.FC<LivenessCameraProps> = ({ onCapture, onCan
                                         <div
                                             key={s}
                                             className={`w-3 h-3 rounded-full transition-all ${capturedFrames.length > idx
-                                                    ? 'bg-green-500 scale-110'
-                                                    : step === s
-                                                        ? 'bg-primary-500 scale-125 ring-4 ring-primary-200'
-                                                        : 'bg-gray-300 dark:bg-gray-600'
+                                                ? 'bg-green-500 scale-110'
+                                                : step === s
+                                                    ? 'bg-primary-500 scale-125 ring-4 ring-primary-200'
+                                                    : 'bg-gray-300 dark:bg-gray-600'
                                                 }`}
                                         />
                                     ))}

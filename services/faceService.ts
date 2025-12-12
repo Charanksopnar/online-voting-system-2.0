@@ -205,3 +205,74 @@ export async function verifyFace(
         };
     }
 }
+
+async function urlToBase64(url: string): Promise<string> {
+    try {
+        const response = await fetch(url);
+        const blob = await response.blob();
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+                const base64String = reader.result as string;
+                // Remove data:image/jpeg;base64, prefix if present
+                const base64Content = base64String.includes(',') ? base64String.split(',')[1] : base64String;
+                resolve(base64Content);
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+    } catch (e) {
+        console.error("Failed to convert URL to base64", e);
+        throw new Error("Could not download ID document.");
+    }
+}
+
+
+export async function verifyIdentityAgainstDoc(
+    liveFaceBase64: string,
+    docData: string, // Can be URL or Base64 (cleaned)
+    existingLiveEmbedding?: number[]
+): Promise<{ verified: boolean; confidence: number; message: string }> {
+    try {
+        // 1. Get Live Face Embedding
+        // Use existing embedding if provided to save a call, otherwise compute it
+        let liveEmbedding = existingLiveEmbedding;
+        if (!liveEmbedding) {
+            liveEmbedding = await getEmbeddingFromDocker(liveFaceBase64);
+        }
+
+        // 2. Get Doc Face Embedding
+        let docBase64 = docData;
+        // If it looks like a URL, download it (fallback support)
+        if (docData.startsWith('http')) {
+            console.log('Fetching ID document via URL for verification...');
+            docBase64 = await urlToBase64(docData);
+        } else {
+            console.log('Using provided base64 ID document for verification...');
+        }
+
+        const docEmbedding = await getEmbeddingFromDocker(docBase64);
+
+        // 3. Compare
+        const distance = computeDistance(liveEmbedding!, docEmbedding);
+        const confidence = distanceToConfidence(distance);
+
+        // Stricter threshold for auto-approval (e.g., 90% confidence or distance < 10)
+        // distance < 10 is the same as verifyFace
+        const isMatch = distance < 10.0;
+
+        return {
+            verified: isMatch,
+            confidence,
+            message: isMatch ? 'Biometric match with ID document.' : 'Face does not match ID document.'
+        };
+
+    } catch (error: any) {
+        console.error('AI Auto-Approval Failed:', error);
+        return {
+            verified: false,
+            confidence: 0,
+            message: 'Could not automatically verify against ID document. Manual review required.'
+        };
+    }
+}

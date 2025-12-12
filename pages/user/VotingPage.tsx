@@ -81,7 +81,9 @@ export const VotingPage = () => {
     // Block voting if no face embeddings exist - require biometric verification
     if (!user?.faceEmbeddings || user.faceEmbeddings.length === 0) {
       addNotification('ERROR', 'Biometric Data Missing',
-        'No face verification data found. Please complete your KYC/face registration before voting.');
+        'No face verification data found. Please go to your Profile and update your face biometrics to vote.');
+      // Optional: Auto redirect could be annoying, but a helpful message is key.
+      setTimeout(() => navigate('/Edit'), 2000); // Guide them there
       return;
     }
 
@@ -169,6 +171,26 @@ export const VotingPage = () => {
           <h2 className="text-xl font-bold text-gray-900 dark:text-white">Electoral Roll Verification Required</h2>
           <p className="text-gray-600 dark:text-gray-400 mt-2 mb-6">Your identity must be verified against the Electoral Roll before you can vote. Please wait for admin verification or request manual verification from your dashboard.</p>
           <button onClick={() => navigate('/User')} className="bg-primary-600 text-white px-6 py-2 rounded-lg hover:bg-primary-700">Go to Dashboard</button>
+        </div>
+      </div>
+    );
+  }
+
+  // STRICT SECURITY CHECK: User must be fully VERIFIED to vote
+  // This prevents users who updated their face (and are in PENDING state) from voting.
+  if (user?.verificationStatus !== 'VERIFIED') {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-900 p-4">
+        <div className="bg-white dark:bg-gray-800 p-8 rounded-lg shadow-md text-center max-w-md">
+          <Lock className="w-12 h-12 text-red-500 mx-auto mb-4" />
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white">Account Locked</h2>
+          <p className="text-gray-600 dark:text-gray-400 mt-2 mb-6">
+            Your verification status is <strong>{user.verificationStatus}</strong>.
+            {user.verificationStatus === 'PENDING'
+              ? ' You recently updated your profile/biometrics. Please wait for Admin approval.'
+              : ' You are not authorized to vote.'}
+          </p>
+          <button onClick={() => navigate('/User')} className="bg-gray-800 text-white px-6 py-2 rounded-lg">Return to Dashboard</button>
         </div>
       </div>
     );

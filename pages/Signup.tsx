@@ -7,7 +7,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Upload, Camera, Check, RefreshCw, User, MapPin, ShieldCheck, FileText, CreditCard, X } from 'lucide-react';
 import { supabase } from '../supabase';
 import { INDIAN_STATES_DISTRICTS } from '../data/indianStatesDistricts';
-import { getEmbeddingForBase64Image } from '../services/faceService';
+import { getEmbeddingForBase64Image, verifyIdentityAgainstDoc } from '../services/faceService';
 
 function Input({ label, fullWidth = false, className = '', ...props }: any) {
     return (
@@ -209,6 +209,15 @@ export const Signup = () => {
         return name.replace(/[^a-z0-9]/gi, '_').toLowerCase();
     };
 
+    const fileToBase64 = (file: File): Promise<string> => {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = error => reject(error);
+        });
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
@@ -262,45 +271,45 @@ export const Signup = () => {
             setLoadingMessage('Creating Secure Profile...');
             setLoading(true);
 
-            // Extract face embeddings FIRST before any other operations
-            // This is critical for voting functionality
-            let faceEmbeddings: number[] | null = null;
-            try {
-                addNotification('INFO', 'Processing Biometrics', 'Extracting face verification data...');
-                faceEmbeddings = await getEmbeddingForBase64Image(faceBase64);
-
-                if (!faceEmbeddings || faceEmbeddings.length === 0) {
-                    throw new Error('Face embedding extraction returned empty data.');
-                }
-
-                addNotification('SUCCESS', 'Biometric Success', `Face data extracted successfully (${faceEmbeddings.length} dimensions).`);
-            } catch (err: any) {
-                console.error('Face embedding extraction during signup failed:', err);
-                addNotification('ERROR', 'Biometric Service Error',
-                    `${err?.message || 'Face service is unavailable.'} Make sure the DeepFace Docker container is running on port 5000.`);
-                setLoading(false);
-                return; // Block registration if embeddings fail
-            }
-
             const tempId = Date.now().toString();
 
-            let kycUrl = '';
-            if (aadhaarFile) {
+            // PARALLEL EXECUTION: Start all uploads and AI processing simultaneously
+            const faceEmbeddingPromise = getEmbeddingForBase64Image(faceBase64)
+                .then(data => {
+                    if (!data || data.length === 0) throw new Error('Face embedding extraction returned empty data.');
+                    return data;
+                });
+
+            const aadhaarUploadPromise = aadhaarFile ? (async () => {
                 const idExt = aadhaarFile.name.split('.').pop();
                 const sanitizedIdName = sanitizeFilename(aadhaarFile.name.split('.')[0]);
-                kycUrl = await uploadToStorage(aadhaarFile, 'uploads', `${tempId}_aadhaar_${sanitizedIdName}.${idExt}`);
-            }
+                return await uploadToStorage(aadhaarFile, 'uploads', `${tempId}_aadhaar_${sanitizedIdName}.${idExt}`);
+            })() : Promise.resolve('');
 
-            let epicUrl = '';
-            if (epicFile) {
+            const epicUploadPromise = epicFile ? (async () => {
                 const idExt = epicFile.name.split('.').pop();
                 const sanitizedIdName = sanitizeFilename(epicFile.name.split('.')[0]);
-                epicUrl = await uploadToStorage(epicFile, 'uploads', `${tempId}_epic_${sanitizedIdName}.${idExt}`);
-            }
+                return await uploadToStorage(epicFile, 'uploads', `${tempId}_epic_${sanitizedIdName}.${idExt}`);
+            })() : Promise.resolve('');
 
-            const facePath = `${tempId}_face.jpg`;
-            const faceUrl = await uploadToStorage(faceImageBlob, 'faces', facePath);
+            const faceUploadPromise = (async () => {
+                const facePath = `${tempId}_face.jpg`;
+                return await uploadToStorage(faceImageBlob, 'faces', facePath);
+            })();
 
+            // Wait for all critical operations
+            addNotification('INFO', 'Processing', 'Uploading documents and processing biometrics...');
+
+            const [faceEmbeddings, kycUrl, epicUrl, faceUrl] = await Promise.all([
+                faceEmbeddingPromise,
+                aadhaarUploadPromise,
+                epicUploadPromise,
+                faceUploadPromise
+            ]);
+
+            addNotification('SUCCESS', 'Biometric Success', `Face data extracted successfully (${faceEmbeddings.length} dimensions).`);
+
+            // 3. Create User Account
             await signUp(formData.email, formData.firstName, formData.lastName, {
                 ...formData,
                 email: formData.email,
@@ -312,7 +321,49 @@ export const Signup = () => {
                 idType: 'AADHAAR'
             });
 
-            // Persist embeddings into profiles table
+
+            // 4. AI Identity Verification (Face vs ID Doc)
+            let verificationStatus = 'PENDING';
+            let electoralRollVerified = false;
+            let manualVerifyRequested = true;
+
+            // Determine which doc to use for verification (Aadhaar preferred, then EPIC)
+            const verifyFile = aadhaarFile || epicFile;
+            const docUrlForAI = kycUrl || epicUrl;
+
+            if (faceBase64 && verifyFile) {
+                try {
+                    setLoadingMessage('AI Verification: Checking Face against ID...');
+
+                    // Convert local file to base64 for immediate verification (no download needed)
+                    // The result includes the "data:image/..." prefix, so we strip it for the service if needed,
+                    // but the updated service can handle it or we clean it here. 
+                    // VerifyIdentityAgainstDoc expects clean base64 usually, or handles it. 
+                    // Looking at service, urlToBase64 strips it. Let's strip it here to be safe/consistent.
+                    const fileBase64Full = await fileToBase64(verifyFile);
+                    const docBase64Clean = fileBase64Full.split(',')[1];
+
+                    // Use the NEW optimized signature: pass base64 directly + existing embeddings
+                    const { verified, message } = await verifyIdentityAgainstDoc(
+                        faceBase64,
+                        docBase64Clean,
+                        faceEmbeddings
+                    );
+
+                    if (verified) {
+                        verificationStatus = 'VERIFIED';
+                        electoralRollVerified = true;
+                        manualVerifyRequested = false;
+                        addNotification('SUCCESS', 'Instant Verification', 'Your identity has been AI-Verified against your ID proof.');
+                    } else {
+                        console.warn('AI Verification Failed during signup:', message);
+                    }
+                } catch (aiErr) {
+                    console.error('AI Check Error:', aiErr);
+                }
+            }
+
+            // Persist embeddings + verification status into profiles table
             if (faceEmbeddings && faceEmbeddings.length > 0) {
                 const { data } = await supabase.auth.getUser();
                 const currentUser = data?.user;
@@ -321,7 +372,11 @@ export const Signup = () => {
                         .from('profiles')
                         .update({
                             face_embeddings: faceEmbeddings,
-                            liveness_verified: true
+                            liveness_verified: true,
+                            verification_status: verificationStatus,
+                            electoral_roll_verified: electoralRollVerified,
+                            manual_verify_requested: manualVerifyRequested,
+                            manual_verify_requested_at: manualVerifyRequested ? new Date().toISOString() : null
                         })
                         .eq('id', currentUser.id);
 
