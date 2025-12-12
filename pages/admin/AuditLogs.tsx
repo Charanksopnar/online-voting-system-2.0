@@ -267,7 +267,7 @@ export const AuditLogs = () => {
                                         </span>
                                     </td>
                                     <td className="p-4 font-medium text-slate-800 dark:text-white">{log.action}</td>
-                                    <td className="p-4 text-slate-600 dark:text-slate-400">{log.actor}</td>
+                                    <td className="p-4 text-slate-600 dark:text-slate-400 capitalize">{log.actor}</td>
                                     <td className="p-4 text-slate-500 max-w-md truncate">{log.details}</td>
                                 </tr>
                             ))}

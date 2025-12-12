@@ -307,8 +307,8 @@ export const VotingPage = () => {
                 }}
               />
               <div className="ml-4 flex-1">
-                <h4 className="text-lg font-bold text-gray-900">{candidate.name}</h4>
-                <p className="text-sm text-primary-600 font-semibold">{candidate.party}</p>
+                <h4 className="text-lg font-bold text-gray-900 capitalize">{candidate.name}</h4>
+                <p className="text-sm text-primary-600 font-semibold capitalize">{candidate.party}</p>
                 <p className="text-xs text-gray-500 mt-1 line-clamp-1">{candidate.manifesto}</p>
               </div>
               <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${selectedCandidate === candidate.id ? 'border-primary-600 bg-primary-600' : 'border-gray-300'

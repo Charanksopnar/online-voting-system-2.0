@@ -4,16 +4,16 @@ import { useNotification } from '../contexts/NotificationContext';
 import { extractIdData } from '../services/geminiService';
 import { LoadingOverlay } from '../components/UI/LoadingOverlay';
 import { useNavigate, Link } from 'react-router-dom';
-import { Upload, Camera, Check, RefreshCw, User, MapPin, ShieldCheck, FileText, CreditCard } from 'lucide-react';
+import { Upload, Camera, Check, RefreshCw, User, MapPin, ShieldCheck, FileText, CreditCard, X } from 'lucide-react';
 import { supabase } from '../supabase';
 import { INDIAN_STATES_DISTRICTS } from '../data/indianStatesDistricts';
 import { getEmbeddingForBase64Image } from '../services/faceService';
 
-function Input({ label, fullWidth = false, ...props }: any) {
+function Input({ label, fullWidth = false, className = '', ...props }: any) {
     return (
         <div className={fullWidth ? "md:col-span-2 space-y-2" : "space-y-2"}>
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">{label}</label>
-            <input className="input-standard" {...props} />
+            <input className={`input-standard ${className}`} {...props} />
         </div>
     );
 }
@@ -23,6 +23,10 @@ export const Signup = () => {
     const { addNotification } = useNotification();
     const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
+    const [loadingMessage, setLoadingMessage] = useState('Creating Secure Profile...');
+
+    const [showAadhaarPopup, setShowAadhaarPopup] = useState(true);
+    const aadhaarInputRef = useRef<HTMLInputElement>(null);
 
     // Files
     const [aadhaarFile, setAadhaarFile] = useState<File | null>(null);
@@ -59,7 +63,7 @@ export const Signup = () => {
 
         // Auto-capitalize proper names and city/state for better data quality
         if (['firstName', 'lastName', 'city'].includes(e.target.name)) {
-            value = value.charAt(0).toUpperCase() + value.slice(1);
+            value = value.replace(/\b\w/g, char => char.toUpperCase());
         }
 
         if (e.target.name === 'email') {
@@ -81,7 +85,14 @@ export const Signup = () => {
         const file = e.target.files?.[0];
         if (file) {
             setAadhaarFile(file);
+            setLoadingMessage('Extracting Aadhaar Details...');
             setLoading(true);
+
+            // Scroll to the file input to show where it landed
+            setTimeout(() => {
+                aadhaarInputRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 500);
+
             const reader = new FileReader();
             reader.onloadend = async () => {
                 const base64 = reader.result as string;
@@ -101,6 +112,8 @@ export const Signup = () => {
                     if (extracted.state) updates.state = extracted.state;
                     if (extracted.district) updates.district = extracted.district;
                     if (extracted.city) updates.city = extracted.city;
+                    if (extracted.email) updates.email = extracted.email.toLowerCase();
+                    if (extracted.phone) updates.phone = extracted.phone.replace(/\D/g, '').slice(-10);
 
                     setFormData(prev => ({ ...prev, ...updates }));
                 }
@@ -114,6 +127,7 @@ export const Signup = () => {
         const file = e.target.files?.[0];
         if (file) {
             setEpicFile(file);
+            setLoadingMessage('Scanning Voter ID...');
             setLoading(true);
             const reader = new FileReader();
             reader.onloadend = async () => {
@@ -197,6 +211,29 @@ export const Signup = () => {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        // 1. Basic Field Validation
+        if (!formData.firstName.trim() || !formData.lastName.trim()) {
+            addNotification('ERROR', 'Required Field', 'Full Name is mandatory.');
+            return;
+        }
+        if (!formData.email.trim()) {
+            addNotification('ERROR', 'Required Field', 'Email Address is mandatory.');
+            return;
+        }
+        if (!formData.phone.trim()) {
+            addNotification('ERROR', 'Required Field', 'Phone Number is mandatory.');
+            return;
+        }
+        if (!formData.dob) {
+            addNotification('ERROR', 'Required Field', 'Date of Birth is mandatory.');
+            return;
+        }
+        if (!formData.password) {
+            addNotification('ERROR', 'Required Field', 'Password is mandatory.');
+            return;
+        }
+
         if (formData.password !== formData.confirmPassword) {
             addNotification('ERROR', 'Validation Error', 'Passwords do not match');
             return;
@@ -209,19 +246,20 @@ export const Signup = () => {
         }
 
         if (!aadhaarFile && !epicFile) {
-            addNotification('ERROR', 'Required', 'Please upload at least one Identity Document.');
+            addNotification('ERROR', 'Identity Missing', 'You must upload either Aadhaar Card OR Voter ID (or both) to register.');
             return;
         }
         if (!faceImageBlob) {
-            addNotification('ERROR', 'Required', 'Biometric Face Capture is mandatory.');
+            addNotification('ERROR', 'Biometric Missing', 'Biometric Face Capture is mandatory for secure voting.');
             return;
         }
         if (!faceBase64) {
-            addNotification('ERROR', 'Required', 'Face image data is missing. Please recapture your face.');
+            addNotification('ERROR', 'Biometric Error', 'Face image data is missing. Please recapture your face.');
             return;
         }
 
         try {
+            setLoadingMessage('Creating Secure Profile...');
             setLoading(true);
 
             // Extract face embeddings FIRST before any other operations
@@ -314,7 +352,55 @@ export const Signup = () => {
 
     return (
         <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex transition-colors duration-200">
-            {loading && <LoadingOverlay message="Creating Secure Profile..." />}
+            {loading && <LoadingOverlay message={loadingMessage} />}
+
+            {/* Auto-fill Popup */}
+            {showAadhaarPopup && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animation-fade-in">
+                    <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-md w-full p-6 relative animation-scale-up border border-slate-200 dark:border-slate-700">
+                        <button
+                            onClick={() => setShowAadhaarPopup(false)}
+                            className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                        >
+                            <X size={20} />
+                        </button>
+
+                        <div className="text-center space-y-4 pt-2">
+                            <div className="w-16 h-16 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce-slow">
+                                <CreditCard className="w-8 h-8 text-primary-600 dark:text-primary-400" />
+                            </div>
+
+                            <h3 className="text-xl font-bold text-slate-900 dark:text-white">
+                                Fast-Track Registration
+                            </h3>
+
+                            <p className="text-slate-600 dark:text-slate-300 leading-relaxed px-2">
+                                Upload your Aadhaar card to automatically fetch details. This helps you fill the form automatically and prevents errors.
+                            </p>
+
+                            <div className="pt-4 flex flex-col gap-3">
+                                <button
+                                    onClick={() => {
+                                        aadhaarInputRef.current?.click();
+                                        setShowAadhaarPopup(false);
+                                    }}
+                                    className="w-full py-3 px-4 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-primary-600/20"
+                                >
+                                    <Upload size={18} />
+                                    Upload Aadhaar Now
+                                </button>
+
+                                <button
+                                    onClick={() => setShowAadhaarPopup(false)}
+                                    className="w-full py-3 px-4 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl font-medium transition"
+                                >
+                                    I'll fill it manually
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Left Info Panel */}
             <div className="hidden xl:flex w-1/3 bg-primary-900 relative overflow-hidden flex-col justify-between p-12 text-white">
@@ -352,8 +438,8 @@ export const Signup = () => {
                                 <User className="text-primary-500" size={20} /> Personal Information
                             </h3>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                <Input label="First Name" name="firstName" value={formData.firstName} onChange={handleChange} required />
-                                <Input label="Last Name" name="lastName" value={formData.lastName} onChange={handleChange} required />
+                                <Input label="First Name" name="firstName" value={formData.firstName} onChange={handleChange} required className="capitalize" />
+                                <Input label="Last Name" name="lastName" value={formData.lastName} onChange={handleChange} required className="capitalize" />
                                 <Input label="Email Address" name="email" type="email" value={formData.email} onChange={handleChange} required fullWidth />
                                 <Input label="Phone Number" name="phone" type="tel" value={formData.phone} onChange={handleChange} required />
                                 <Input label="Date of Birth" name="dob" type="date" value={formData.dob} onChange={handleChange} required />
@@ -398,7 +484,7 @@ export const Signup = () => {
                                         ))}
                                     </select>
                                 </div>
-                                <Input label="City" name="city" value={formData.city} onChange={handleChange} required fullWidth />
+                                <Input label="City" name="city" value={formData.city} onChange={handleChange} required fullWidth className="capitalize" />
                                 <Input label="Password" name="password" type="password" value={formData.password} onChange={handleChange} required />
                                 <Input label="Confirm Password" name="confirmPassword" type="password" value={formData.confirmPassword} onChange={handleChange} required />
                             </div>
@@ -421,7 +507,13 @@ export const Signup = () => {
                                                 <CreditCard className="w-8 h-8 text-slate-400 mb-2" />
                                                 <p className="text-xs text-slate-500 font-medium">Upload Aadhaar</p>
                                             </div>
-                                            <input type="file" className="hidden" onChange={handleAadhaarUpload} accept="image/*,application/pdf" />
+                                            <input
+                                                ref={aadhaarInputRef}
+                                                type="file"
+                                                className="hidden"
+                                                onChange={handleAadhaarUpload}
+                                                accept="image/*,application/pdf"
+                                            />
                                         </div>
                                     </label>
                                     {aadhaarFile && <div className="flex items-center gap-2 text-xs text-emerald-600 font-medium bg-emerald-50 dark:bg-emerald-900/30 p-2 rounded-lg border border-emerald-100 dark:border-emerald-800"><Check size={12} /> {aadhaarFile.name}</div>}

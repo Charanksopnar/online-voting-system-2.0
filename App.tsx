@@ -7,6 +7,8 @@ import { RealtimeProvider } from './contexts/RealtimeContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { Navbar } from './components/Layout/Navbar';
 import { AdminLayout } from './components/Layout/AdminLayout';
+import { ProtectedRoute } from './components/ProtectedRoute';
+import { UserRole } from './types';
 import { Home } from './pages/Home';
 import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
@@ -70,33 +72,33 @@ export default function App() {
                   <Route path="/diagnostic" element={<Diagnostic />} />
 
                   {/* User Protected Routes */}
-                  <Route path="/User" element={<UserDashboard />} />
-                  <Route path="/Edit" element={<EditProfile />} />
-                  <Route path="/notifications" element={<UserNotifications />} />
-                  <Route path="/IdVerification" element={<IdVerification />} />
+                  <Route path="/User" element={<ProtectedRoute allowedRoles={[UserRole.VOTER]}><UserDashboard /></ProtectedRoute>} />
+                  <Route path="/Edit" element={<ProtectedRoute allowedRoles={[UserRole.VOTER]}><EditProfile /></ProtectedRoute>} />
+                  <Route path="/notifications" element={<ProtectedRoute allowedRoles={[UserRole.VOTER]}><UserNotifications /></ProtectedRoute>} />
+                  <Route path="/IdVerification" element={<ProtectedRoute allowedRoles={[UserRole.VOTER]}><IdVerification /></ProtectedRoute>} />
                   <Route path="/verify-id" element={<Navigate to="/IdVerification" replace />} />
-                  <Route path="/Vote/:id" element={<VotingPage />} />
-                  <Route path="/face-capture-preview" element={<FaceCapturePreview />} />
+                  <Route path="/Vote/:id" element={<ProtectedRoute allowedRoles={[UserRole.VOTER]}><VotingPage /></ProtectedRoute>} />
+                  <Route path="/face-capture-preview" element={<ProtectedRoute allowedRoles={[UserRole.VOTER]}><FaceCapturePreview /></ProtectedRoute>} />
                 </Route>
 
                 {/* Admin Routes with Sidebar Layout */}
                 <Route element={<DashboardLayout />}>
-                  <Route path="/Admin" element={<AdminDashboard />} />
+                  <Route path="/Admin" element={<ProtectedRoute allowedRoles={[UserRole.ADMIN]}><AdminDashboard /></ProtectedRoute>} />
                   <Route path="/admin/dashboard" element={<Navigate to="/Admin" replace />} />
-                  <Route path="/Voters" element={<VotersManagement />} />
-                  <Route path="/candidate" element={<CandidatesManagement />} />
+                  <Route path="/Voters" element={<ProtectedRoute allowedRoles={[UserRole.ADMIN]}><VotersManagement /></ProtectedRoute>} />
+                  <Route path="/candidate" element={<ProtectedRoute allowedRoles={[UserRole.ADMIN]}><CandidatesManagement /></ProtectedRoute>} />
                   <Route path="/admin/candidate-management" element={<Navigate to="/candidate" replace />} />
-                  <Route path="/AddCandidate" element={<AddCandidate />} />
-                  <Route path="/AddElection" element={<AddElection />} />
-                  <Route path="/admin/region-election" element={<RegionConfiguration />} />
-                  <Route path="/admin/kyc-review" element={<KycReview />} />
-                  <Route path="/admin/visualizations" element={<AdminVisualizations />} />
-                  <Route path="/admin/voter-lists" element={<VoterListsVerification />} />
-                  <Route path="/invalidVotes" element={<InvalidVotes />} />
-                  <Route path="/admin/notifications" element={<AdminNotifications />} />
-                  <Route path="/calendar" element={<CalendarPage />} />
-                  <Route path="/upcoming" element={<UpcomingElections />} />
-                  <Route path="/admin/logs" element={<AuditLogs />} />
+                  <Route path="/AddCandidate" element={<ProtectedRoute allowedRoles={[UserRole.ADMIN]}><AddCandidate /></ProtectedRoute>} />
+                  <Route path="/AddElection" element={<ProtectedRoute allowedRoles={[UserRole.ADMIN]}><AddElection /></ProtectedRoute>} />
+                  <Route path="/admin/region-election" element={<ProtectedRoute allowedRoles={[UserRole.ADMIN]}><RegionConfiguration /></ProtectedRoute>} />
+                  <Route path="/admin/kyc-review" element={<ProtectedRoute allowedRoles={[UserRole.ADMIN]}><KycReview /></ProtectedRoute>} />
+                  <Route path="/admin/visualizations" element={<ProtectedRoute allowedRoles={[UserRole.ADMIN]}><AdminVisualizations /></ProtectedRoute>} />
+                  <Route path="/admin/voter-lists" element={<ProtectedRoute allowedRoles={[UserRole.ADMIN]}><VoterListsVerification /></ProtectedRoute>} />
+                  <Route path="/invalidVotes" element={<ProtectedRoute allowedRoles={[UserRole.ADMIN]}><InvalidVotes /></ProtectedRoute>} />
+                  <Route path="/admin/notifications" element={<ProtectedRoute allowedRoles={[UserRole.ADMIN]}><AdminNotifications /></ProtectedRoute>} />
+                  <Route path="/calendar" element={<ProtectedRoute allowedRoles={[UserRole.ADMIN]}><CalendarPage /></ProtectedRoute>} />
+                  <Route path="/upcoming" element={<ProtectedRoute allowedRoles={[UserRole.ADMIN]}><UpcomingElections /></ProtectedRoute>} />
+                  <Route path="/admin/logs" element={<ProtectedRoute allowedRoles={[UserRole.ADMIN]}><AuditLogs /></ProtectedRoute>} />
                 </Route>
 
                 {/* Fallbacks */}

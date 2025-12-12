@@ -5,7 +5,7 @@ import { Search, Ban, Unlock, Trash2, Eye, FileText, CheckCircle, AlertCircle, C
 import { VerificationStatus } from '../../types';
 
 export const VotersManagement = () => {
-    const { voters, blockVoter, unblockVoter, deleteVoter, updateVoterStatus, officialVoters, crossVerifyElectoralRoll } = useRealtime();
+    const { voters, blockVoter, unblockVoter, deleteVoter, officialVoters, crossVerifyElectoralRoll } = useRealtime();
 
     const [filterState, setFilterState] = useState('');
     const [filterDistrict, setFilterDistrict] = useState('');
@@ -50,7 +50,7 @@ export const VotersManagement = () => {
     };
 
     return (
-        <div className="min-h-screen">
+        <div className="min-h-screen transition-colors duration-200 bg-slate-50 dark:bg-slate-900 p-6">
             {/* Header */}
             <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
                 <div>
@@ -62,11 +62,11 @@ export const VotersManagement = () => {
                     <select
                         value={filterState}
                         onChange={handleStateFilterChange}
-                        className="input-standard py-2.5 px-3 min-w-[150px] text-sm"
+                        className="input-standard py-2.5 px-3 min-w-[150px] text-sm bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
                     >
-                        <option value="">All States</option>
+                        <option value="" className="bg-white text-slate-800 dark:bg-slate-800 dark:text-slate-100">All States</option>
                         {Object.keys(INDIAN_STATES_DISTRICTS).map(s => (
-                            <option key={s} value={s}>{s}</option>
+                            <option key={s} value={s} className="bg-white text-slate-800 dark:bg-slate-800 dark:text-slate-100">{s}</option>
                         ))}
                     </select>
 
@@ -75,11 +75,11 @@ export const VotersManagement = () => {
                         value={filterDistrict}
                         onChange={e => setFilterDistrict(e.target.value)}
                         disabled={!filterState}
-                        className="input-standard py-2.5 px-3 min-w-[150px] text-sm disabled:opacity-50"
+                        className="input-standard py-2.5 px-3 min-w-[150px] text-sm disabled:opacity-50 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
                     >
-                        <option value="">All Districts</option>
+                        <option value="" className="bg-white text-slate-800 dark:bg-slate-800 dark:text-slate-100">All Districts</option>
                         {districtsForFilter.map(d => (
-                            <option key={d} value={d}>{d}</option>
+                            <option key={d} value={d} className="bg-white text-slate-800 dark:bg-slate-800 dark:text-slate-100">{d}</option>
                         ))}
                     </select>
 
@@ -118,7 +118,7 @@ export const VotersManagement = () => {
                                         <img src={voter.faceUrl || voter.photoUrl} className="w-10 h-10 rounded-full bg-slate-200 dark:bg-slate-600 object-cover shadow-sm" alt="V" />
                                     </td>
                                     <td className="p-4">
-                                        <div className="font-bold text-slate-800 dark:text-white">{voter.firstName} {voter.lastName}</div>
+                                        <div className="font-bold text-slate-800 dark:text-white capitalize">{voter.firstName} {voter.lastName}</div>
                                         <div className="text-xs text-slate-500">{voter.email}</div>
                                     </td>
                                     <td className="p-4">
@@ -126,8 +126,8 @@ export const VotersManagement = () => {
                                         <div className="text-xs text-slate-500">Age: {voter.age}</div>
                                     </td>
                                     <td className="p-4">
-                                        <div className="text-sm font-medium text-slate-800 dark:text-white">{voter.address?.state || 'N/A'}</div>
-                                        <div className="text-xs text-slate-500">{voter.address?.district}</div>
+                                        <div className="text-sm font-medium text-slate-800 dark:text-white capitalize">{voter.address?.state || 'N/A'}</div>
+                                        <div className="text-xs text-slate-500 capitalize">{voter.address?.district}</div>
                                     </td>
                                     <td className="p-4 font-mono text-xs text-slate-600 dark:text-slate-400">
                                         <span className="bg-slate-100 dark:bg-slate-900 px-2 py-1 rounded block mb-1">Aadhaar: {voter.aadhaarNumber || voter.idNumber || 'N/A'}</span>
@@ -170,8 +170,8 @@ export const VotersManagement = () => {
                                         <button
                                             onClick={() => voter.isBlocked ? unblockVoter(voter.id) : blockVoter(voter.id, 'Admin Action')}
                                             className={`px-3 py-1 rounded-full text-[10px] font-bold border flex items-center gap-1 w-fit transition-colors ${voter.isBlocked
-                                                    ? 'border-red-200 bg-red-50 text-red-600 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400'
-                                                    : 'border-green-200 bg-green-50 text-green-600 dark:bg-green-900/20 dark:border-green-800 dark:text-green-400'
+                                                ? 'border-red-200 bg-red-50 text-red-600 dark:bg-red-900/20 dark:border-red-800 dark:text-red-400'
+                                                : 'border-green-200 bg-green-50 text-green-600 dark:bg-green-900/20 dark:border-green-800 dark:text-green-400'
                                                 }`}
                                         >
                                             {voter.isBlocked ? <><Ban size={10} /> BLOCKED</> : <><Unlock size={10} /> ACTIVE</>}
@@ -206,7 +206,7 @@ export const VotersManagement = () => {
                     <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-3xl w-full overflow-hidden border border-slate-200 dark:border-slate-700 max-h-[90vh] overflow-y-auto">
                         <div className="bg-slate-900 text-white p-6 flex justify-between items-start">
                             <div>
-                                <h3 className="text-xl font-bold">{selectedVoter.firstName} {selectedVoter.lastName}</h3>
+                                <h3 className="text-xl font-bold capitalize">{selectedVoter.firstName} {selectedVoter.lastName}</h3>
                                 <p className="text-slate-400 text-sm">{selectedVoter.id}</p>
                             </div>
                             <button onClick={() => setSelectedVoter(null)} className="text-slate-400 hover:text-white"><Eye size={20} /></button>
@@ -236,22 +236,14 @@ export const VotersManagement = () => {
                             <div className="md:col-span-3 grid grid-cols-2 md:grid-cols-3 gap-4 bg-slate-50 dark:bg-slate-900/50 p-4 rounded-xl border border-slate-100 dark:border-slate-700">
                                 <div><span className="text-slate-500 text-xs block">Email</span> <span className="text-slate-800 dark:text-white text-sm font-medium">{selectedVoter.email}</span></div>
                                 <div><span className="text-slate-500 text-xs block">Phone</span> <span className="text-slate-800 dark:text-white text-sm font-medium">{selectedVoter.phone}</span></div>
-                                <div><span className="text-slate-500 text-xs block">Address</span> <span className="text-slate-800 dark:text-white text-sm font-medium">{selectedVoter.address?.city}, {selectedVoter.address?.state}</span></div>
+                                <div><span className="text-slate-500 text-xs block">Address</span> <span className="text-slate-800 dark:text-white text-sm font-medium capitalize">{selectedVoter.address?.city}, {selectedVoter.address?.state}</span></div>
                                 <div><span className="text-slate-500 text-xs block">Verification</span> <span className="text-slate-800 dark:text-white text-sm font-medium">{selectedVoter.verificationStatus}</span></div>
                                 <div><span className="text-slate-500 text-xs block">Aadhaar No.</span> <span className="text-slate-800 dark:text-white text-sm font-medium">{selectedVoter.aadhaarNumber || selectedVoter.idNumber || '-'}</span></div>
                                 <div><span className="text-slate-500 text-xs block">EPIC No.</span> <span className="text-slate-800 dark:text-white text-sm font-medium">{selectedVoter.epicNumber || '-'}</span></div>
                             </div>
                         </div>
                         <div className="p-6 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-3 bg-slate-50 dark:bg-slate-800/50">
-                            <button
-                                onClick={async () => {
-                                    await updateVoterStatus(selectedVoter.id, VerificationStatus.VERIFIED);
-                                    setSelectedVoter(null);
-                                }}
-                                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700"
-                            >
-                                Approve for Voting
-                            </button>
+
                             <button onClick={() => setSelectedVoter(null)} className="px-4 py-2 text-slate-600 hover:bg-slate-200 rounded-lg">Close</button>
                         </div>
                     </div>

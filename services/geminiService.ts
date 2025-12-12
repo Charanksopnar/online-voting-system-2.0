@@ -14,7 +14,7 @@ const urlToBase64 = async (url: string): Promise<string> => {
       reader.onloadend = () => {
         const base64String = reader.result as string;
         // Remove data:image/jpeg;base64, prefix
-        resolve(base64String.split(',')[1]); 
+        resolve(base64String.split(',')[1]);
       };
       reader.onerror = reject;
       reader.readAsDataURL(blob);
@@ -61,17 +61,17 @@ export const analyzeFraudRisk = async (votingPattern: any): Promise<{ riskLevel:
 
 export const extractIdData = async (imageBase64: string, docType: 'AADHAAR' | 'EPIC' = 'AADHAAR'): Promise<any> => {
   if (!apiKey) {
-      // Mock for demo if no API key
-      return docType === 'AADHAAR' 
-        ? { name: "John Doe", idNumber: "123456789012" }
-        : { name: "John Doe", idNumber: "ABC1234567" };
+    // Mock for demo if no API key
+    return docType === 'AADHAAR'
+      ? { name: "John Doe", idNumber: "123456789012" }
+      : { name: "John Doe", idNumber: "ABC1234567" };
   }
 
   try {
     const model = 'gemini-2.5-flash';
     const prompt = docType === 'AADHAAR'
-        ? "Analyze this image of an Aadhaar Card. Extract the Name, Date of Birth (dob in YYYY-MM-DD format), Address (State, District, City), and the 12-digit Aadhaar Number. Return JSON: { name, dob, state, district, city, idNumber }."
-        : "Analyze this image of a Voter ID (EPIC) Card. Extract the Name and the EPIC Number (alphanumeric ID). Return JSON: { name, idNumber }.";
+      ? "Analyze this image of an Aadhaar Card. Extract the Name, Date of Birth (dob in YYYY-MM-DD format), Address (State, District, City), 12-digit Aadhaar Number, and contact details if available (Email, Phone/Mobile). Return JSON: { name, dob, state, district, city, idNumber, email, phone }."
+      : "Analyze this image of a Voter ID (EPIC) Card. Extract the Name and the EPIC Number (alphanumeric ID). Return JSON: { name, idNumber }.";
 
     const response = await ai.models.generateContent({
       model,
@@ -94,11 +94,11 @@ export const extractIdData = async (imageBase64: string, docType: 'AADHAAR' | 'E
 
 export const verifyFaceIdentity = async (storedFaceUrl: string, currentFaceBase64: string): Promise<{ match: boolean; confidence: number }> => {
   if (!apiKey) return { match: true, confidence: 0.99 }; // Dev fallback
-  
+
   try {
     // Convert stored URL to base64 to send to Gemini
     const storedFaceBase64 = await urlToBase64(storedFaceUrl);
-    
+
     if (!storedFaceBase64) return { match: false, confidence: 0 };
 
     const model = 'gemini-2.5-flash';
@@ -126,11 +126,11 @@ export const verifyFaceIdentity = async (storedFaceUrl: string, currentFaceBase6
       config: {
         responseMimeType: "application/json",
         responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-                match: { type: Type.BOOLEAN },
-                confidence: { type: Type.NUMBER }
-            }
+          type: Type.OBJECT,
+          properties: {
+            match: { type: Type.BOOLEAN },
+            confidence: { type: Type.NUMBER }
+          }
         }
       }
     });

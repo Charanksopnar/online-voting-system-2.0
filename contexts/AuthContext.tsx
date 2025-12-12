@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User, UserRole, VerificationStatus } from '../types';
 import { useNotification } from './NotificationContext';
-import { supabase } from '../supabase';
+import { supabaseVoter, supabaseAdmin, getSupabaseClient } from '../supabase';
 
 interface AuthContextType {
   user: User | null;
@@ -64,50 +64,126 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState<boolean>(true);
   const { addNotification } = useNotification();
 
+  // Use ref to track user state in async listeners without stale closures
+  const userRef = React.useRef<User | null>(null);
   useEffect(() => {
-    // Check active session on mount
-    const checkSession = async () => {
+    userRef.current = user;
+  }, [user]);
+
+  useEffect(() => {
+    // Check active sessions on mount - priority: voter first, then admin
+    const checkSessions = async () => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session && session.user) {
-          const { data: profile } = await supabase
+        // Priority 1: Check voter session
+        const { data: { session: voterSession } } = await supabaseVoter.auth.getSession();
+        if (voterSession?.user) {
+          const { data: profile, error: profileError } = await supabaseVoter
             .from('profiles')
             .select('*')
-            .eq('id', session.user.id)
+            .eq('id', voterSession.user.id)
             .single();
 
-          if (profile) {
+          if (!profileError && profile?.role === 'VOTER') {
             setUser(mapProfileToUser(profile));
+            setLoading(false);
+            return; // ✅ Found valid voter session, stop checking
           }
         }
+
+        // Priority 2: Check admin session (only if no voter session found)
+        const { data: { session: adminSession } } = await supabaseAdmin.auth.getSession();
+        if (adminSession?.user) {
+          const { data: profile, error: profileError } = await supabaseAdmin
+            .from('profiles')
+            .select('*')
+            .eq('id', adminSession.user.id)
+            .single();
+
+          if (!profileError && profile?.role === 'ADMIN') {
+            setUser(mapProfileToUser(profile));
+            setLoading(false);
+            return; // ✅ Found valid admin session
+          }
+        }
+
+        // No valid session found
+        setLoading(false);
       } catch (error) {
-        console.error('Session check failed', error);
-      } finally {
+        console.error('Session check failed:', error);
         setLoading(false);
       }
     };
 
-    checkSession();
+    checkSessions();
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+    // Listen for auth changes on voter client
+    const voterSubscription = supabaseVoter.auth.onAuthStateChange(async (event, session) => {
+      console.log('[Voter Auth Event]:', event, session?.user?.id);
+
       if (event === 'SIGNED_OUT') {
-        setUser(null);
+        // Only clear user if current user is a voter
+        setUser(prev => {
+          if (prev?.role === 'VOTER') {
+            console.log('[Voter] Signing out voter user');
+            return null;
+          }
+          return prev;
+        });
       } else if (event === 'SIGNED_IN' && session?.user) {
-        // Allow a small delay for trigger to create profile if this is a fresh signup
-        setTimeout(async () => {
-          const { data: profile } = await supabase
+        // Fetch profile immediately (no setTimeout to avoid race conditions)
+        try {
+          const { data: profile, error: profileError } = await supabaseVoter
             .from('profiles')
             .select('*')
             .eq('id', session.user.id)
             .single();
-          if (profile) setUser(mapProfileToUser(profile));
-        }, 500);
+
+          if (!profileError && profile?.role === 'VOTER') {
+            console.log('[Voter] Setting voter user:', profile.email);
+            setUser(mapProfileToUser(profile));
+          }
+        } catch (error) {
+          console.error('[Voter] Failed to fetch profile:', error);
+        }
       }
+      // Ignore TOKEN_REFRESHED and other events to prevent cross-tab interference
+    });
+
+    const adminSubscription = supabaseAdmin.auth.onAuthStateChange(async (event, session) => {
+      console.log('[Admin Auth Event]:', event, session?.user?.id);
+
+      if (event === 'SIGNED_OUT') {
+        // Only clear user if current user is an admin
+        setUser(prev => {
+          if (prev?.role === 'ADMIN') {
+            console.log('[Admin] Signing out admin user');
+            return null;
+          }
+          return prev;
+        });
+      } else if (event === 'SIGNED_IN' && session?.user) {
+        // Fetch profile immediately (no setTimeout to avoid race conditions)
+        try {
+          const { data: profile, error: profileError } = await supabaseAdmin
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .single();
+
+          if (!profileError && profile?.role === 'ADMIN') {
+            console.log('[Admin] Setting admin user:', profile.email);
+            setUser(mapProfileToUser(profile));
+          }
+        } catch (error) {
+          console.error('[Admin] Failed to fetch profile:', error);
+        }
+      }
+      // Ignore TOKEN_REFRESHED and other events to prevent cross-tab interference
     });
 
     return () => {
-      subscription.unsubscribe();
+      voterSubscription.data.subscription.unsubscribe();
+      adminSubscription.data.subscription.unsubscribe();
     };
   }, []);
 
@@ -115,7 +191,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     if (!user?.id) return;
 
-    const channel = supabase.channel(`public:profiles:id=eq.${user.id}`)
+    // Use the correct client based on user role
+    const client = user.role === 'ADMIN' ? supabaseAdmin : supabaseVoter;
+
+    const channel = client.channel(`public:profiles:id=eq.${user.id}`)
       .on('postgres_changes', {
         event: 'UPDATE',
         schema: 'public',
@@ -146,14 +225,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      client.removeChannel(channel);
     };
-  }, [user?.id, addNotification]);
+  }, [user?.id, user?.role, addNotification]);
 
   const signIn = async (email: string, password: string, role: UserRole) => {
     setLoading(true);
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      // Use the correct client based on role
+      const client = getSupabaseClient(role);
+
+      const { data, error } = await client.auth.signInWithPassword({
         email: email.trim().toLowerCase(),
         password
       });
@@ -161,7 +243,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (error) throw error;
       if (!data.user) throw new Error('No user found');
 
-      const { data: profile, error: profileError } = await supabase
+      const { data: profile, error: profileError } = await client
         .from('profiles')
         .select('*')
         .eq('id', data.user.id)
@@ -170,12 +252,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       if (profileError || !profile) throw new Error('Profile not found. Please contact support.');
 
       if (profile.role !== role) {
-        await supabase.auth.signOut();
+        await client.auth.signOut();
         throw new Error(`Unauthorized. This account is not registered as a ${role}.`);
       }
 
       if (profile.is_blocked) {
-        await supabase.auth.signOut();
+        await client.auth.signOut();
         throw new Error(`Account Blocked: ${profile.block_reason}`);
       }
 
@@ -197,12 +279,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setLoading(true);
     try {
       const role = email.toLowerCase().includes('admin') ? UserRole.ADMIN : UserRole.VOTER;
+      const client = getSupabaseClient(role);
 
       if (!details.password) {
         throw new Error("Password is required for signup");
       }
 
-      const { data: authData, error: authError } = await supabase.auth.signUp({
+      const { data: authData, error: authError } = await client.auth.signUp({
         email: email.trim().toLowerCase(),
         password: details.password,
         options: {
@@ -242,7 +325,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    if (!user) return;
+
+    // Sign out from the correct client based on current user role
+    const client = user.role === 'ADMIN' ? supabaseAdmin : supabaseVoter;
+    await client.auth.signOut();
     setUser(null);
     addNotification('INFO', 'Signed Out', 'See you next time!');
   };

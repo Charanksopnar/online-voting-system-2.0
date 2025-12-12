@@ -52,20 +52,23 @@ const ElectionCard = ({ election, candidates }: { election: Election; candidates
                             </span>
                         )}
                     </div>
-                    <h3 className="text-lg font-bold text-slate-800 dark:text-white">{election.title}</h3>
+                    <h3 className="text-lg font-bold text-slate-800 dark:text-white capitalize">{election.title}</h3>
                 </div>
-                <Link
-                    to="/AddCandidate"
-                    className="p-2 bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-900/40 transition"
-                >
-                    <Plus size={18} />
-                </Link>
+                {/* Only show add candidate button for UPCOMING elections */}
+                {election.status === 'UPCOMING' && (
+                    <Link
+                        to="/AddCandidate"
+                        className="p-2 bg-primary-50 dark:bg-primary-900/20 text-primary-600 dark:text-primary-400 rounded-lg hover:bg-primary-100 dark:hover:bg-primary-900/40 transition"
+                    >
+                        <Plus size={18} />
+                    </Link>
+                )}
             </div>
 
             <div className="grid grid-cols-2 gap-4 mb-4">
                 <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
                     <MapPin size={14} className="text-primary-500" />
-                    {getLocationDisplay(election)}
+                    <span className="capitalize">{getLocationDisplay(election)}</span>
                 </div>
                 <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
                     <Users size={14} className="text-primary-500" />
@@ -103,10 +106,10 @@ const ElectionCard = ({ election, candidates }: { election: Election; candidates
                                 className="w-8 h-8 rounded-full object-cover"
                             />
                             <div>
-                                <div className="font-medium text-slate-800 dark:text-white text-sm">
+                                <div className="font-medium text-slate-800 dark:text-white text-sm capitalize">
                                     {electionCandidates.sort((a, b) => (b.votes || 0) - (a.votes || 0))[0]?.name}
                                 </div>
-                                <div className="text-xs text-slate-500">
+                                <div className="text-xs text-slate-500 capitalize">
                                     {electionCandidates.sort((a, b) => (b.votes || 0) - (a.votes || 0))[0]?.party}
                                 </div>
                             </div>

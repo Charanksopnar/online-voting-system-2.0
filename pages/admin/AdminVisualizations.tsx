@@ -81,7 +81,7 @@ export const AdminVisualizations = () => {
     const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
 
     return (
-        <div className="min-h-screen space-y-6">
+        <div className="min-h-screen space-y-6 transition-colors duration-200 bg-slate-50 dark:bg-slate-900 p-6">
             <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
                 <div>
                     <h2 className="text-2xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
@@ -99,11 +99,11 @@ export const AdminVisualizations = () => {
                     <select
                         value={filterState}
                         onChange={handleStateFilterChange}
-                        className="input-select text-sm py-1.5"
+                        className="input-select text-sm py-1.5 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-lg px-2"
                     >
-                        <option value="">All States</option>
+                        <option value="" className="dark:bg-slate-800">All States</option>
                         {Object.keys(INDIAN_STATES_DISTRICTS).map(s => (
-                            <option key={s} value={s}>{s}</option>
+                            <option key={s} value={s} className="dark:bg-slate-800">{s}</option>
                         ))}
                     </select>
 
@@ -111,11 +111,11 @@ export const AdminVisualizations = () => {
                         value={filterDistrict}
                         onChange={e => setFilterDistrict(e.target.value)}
                         disabled={!filterState}
-                        className="input-select text-sm py-1.5 disabled:opacity-50"
+                        className="input-select text-sm py-1.5 disabled:opacity-50 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-lg px-2"
                     >
-                        <option value="">All Districts</option>
+                        <option value="" className="dark:bg-slate-800">All Districts</option>
                         {districtsForFilter.map(d => (
-                            <option key={d} value={d}>{d}</option>
+                            <option key={d} value={d} className="dark:bg-slate-800">{d}</option>
                         ))}
                     </select>
 

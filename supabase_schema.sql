@@ -19,8 +19,10 @@ alter table public.profiles
   add column if not exists email text,
   add column if not exists first_name text,
   add column if not exists last_name text,
+  add column if not exists father_name text,
   add column if not exists role text default 'VOTER',
   add column if not exists verification_status text default 'NOT_STARTED',
+  add column if not exists verification_rejection_reason text,
   add column if not exists is_blocked boolean default false,
   add column if not exists block_reason text,
   add column if not exists photo_url text,
@@ -139,6 +141,8 @@ alter table public.official_voter_lists
   add column if not exists address_district text,
   add column if not exists address_city text,
   add column if not exists polling_booth text,
+  add column if not exists dob text,
+  add column if not exists full_address text,
   add column if not exists created_at timestamptz default timezone('utc'::text, now());
 
 -- Add electoral roll verification columns to profiles
@@ -479,12 +483,54 @@ language plpgsql
 security definer
 set search_path = public, auth
 as $$
+declare
+  voter_record public.official_voter_lists%ROWTYPE;
+  is_verified boolean := false;
+  rejection_reason text := null;
+  user_age int;
+  user_dob text;
+  user_father text;
 begin
+  -- Extract metadata
+  user_age := nullif(new.raw_user_meta_data->>'age', '')::int;
+  user_dob := new.raw_user_meta_data->>'dob';
+  user_father := new.raw_user_meta_data->>'fatherName';
+
+  -- 1. Age Check
+  if user_age < 18 then
+    is_verified := false;
+    rejection_reason := 'User is underage (must be 18+)';
+  else
+    -- 2. Voter Lookup
+    select * into voter_record from public.official_voter_lists 
+    where (aadhaar_number = new.raw_user_meta_data->>'aadhaarNumber' and aadhaar_number is not null)
+       or (epic_number = new.raw_user_meta_data->>'epicNumber' and epic_number is not null)
+    limit 1;
+
+    if not found then
+      is_verified := false;
+      rejection_reason := 'Details not found in official voter records. Please check your Aadhaar/EPIC number.';
+    else
+      -- 3. Strict Verification (DOB & Father Name)
+      if voter_record.dob is distinct from user_dob then
+        is_verified := false;
+        rejection_reason := 'Date of Birth mismatch with official records.';
+      elsif lower(trim(voter_record.father_name)) is distinct from lower(trim(user_father)) then
+        is_verified := false;
+        rejection_reason := 'Father Name mismatch with official records.';
+      else
+        is_verified := true;
+        rejection_reason := null;
+      end if;
+    end if;
+  end if;
+
   insert into public.profiles (
     id,
     email,
     first_name,
     last_name,
+    father_name,
     role,
     age,
     dob,
@@ -499,16 +545,20 @@ begin
     aadhaar_number,
     epic_number,
     epic_doc_url,
-    photo_url
+    photo_url,
+    electoral_roll_verified,
+    electoral_roll_match_id,
+    verification_rejection_reason
   )
   values (
     new.id,
     new.email,
     new.raw_user_meta_data->>'firstName',
     new.raw_user_meta_data->>'lastName',
+    new.raw_user_meta_data->>'fatherName',
     coalesce(new.raw_user_meta_data->>'role', 'VOTER'),
-    nullif(new.raw_user_meta_data->>'age', '')::int,
-    new.raw_user_meta_data->>'dob',
+    user_age,
+    user_dob,
     new.raw_user_meta_data->>'phone',
     new.raw_user_meta_data->>'state',
     new.raw_user_meta_data->>'district',
@@ -524,7 +574,10 @@ begin
       || coalesce(new.raw_user_meta_data->>'firstName', '')
       || '+'
       || coalesce(new.raw_user_meta_data->>'lastName', '')
-      || '&background=random'
+      || '&background=random',
+    is_verified,
+    case when is_verified then voter_record.id else null end,
+    rejection_reason
   );
   return new;
 end;

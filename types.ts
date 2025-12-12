@@ -63,6 +63,8 @@ export interface OfficialVoter {
   district?: string;
   city?: string;
   pollingBooth?: string;
+  dob?: string;
+  fullAddress?: string;
   createdAt?: string;
 }
 

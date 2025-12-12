@@ -166,6 +166,8 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
     district: o.address_district,
     city: o.address_city,
     pollingBooth: o.polling_booth,
+    dob: o.dob,
+    fullAddress: o.full_address,
     createdAt: o.created_at
   });
 
@@ -423,7 +425,9 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
       address_state: v.state,
       address_district: v.district,
       address_city: v.city,
-      polling_booth: v.pollingBooth
+      polling_booth: v.pollingBooth,
+      dob: v.dob,
+      full_address: v.fullAddress
     }));
     const { error } = await supabase.from('official_voter_lists').insert(insertData);
     if (error) addNotification('ERROR', 'Upload Failed', error.message);
@@ -446,7 +450,9 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
       address_state: voter.state,
       address_district: voter.district,
       address_city: voter.city,
-      polling_booth: voter.pollingBooth
+      polling_booth: voter.pollingBooth,
+      dob: voter.dob,
+      full_address: voter.fullAddress
     }).eq('id', voter.id);
     if (error) addNotification('ERROR', 'Update Failed', error.message);
     else addNotification('SUCCESS', 'Updated', 'Official voter record updated.');

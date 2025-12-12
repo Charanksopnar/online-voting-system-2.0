@@ -100,7 +100,7 @@ SecureVote AI is a state-of-the-art online voting platform designed to ensure se
 
 ---
 
-## �️ Setup & Installation
+## ⚙️ Setup & Installation
 
 ### Prerequisites
 - Node.js (v16+)
@@ -124,22 +124,39 @@ npm install
 2. Copy the contents of `supabase_schema.sql`.
 3. Run the script to create all tables, policies, and triggers.
 
-### 4. Run the Face Service
-Ensure you have the DeepFace API running on port 5000.
-*(If you have the python script)*:
+### 4. Pull the DeepFace Docker Image
 ```bash
-python face_service.py
-```
-*(Or via Docker)*:
-```bash
-docker run -p 5000:5000 serenity/deepface-api
+docker pull serengil/deepface
 ```
 
 ### 5. Start the Application
+
+**Option A: Run everything together (Recommended)**
 ```bash
+npm run dev:all
+```
+This starts both the Vite dev server and DeepFace Docker container concurrently.
+
+**Option B: Run services separately**
+```bash
+# Terminal 1 - Start the Face Service
+npm run dev:face
+
+# Terminal 2 - Start the Vite dev server
 npm run dev
 ```
+
 Access the app at `http://localhost:5173`.
+
+### 📜 Available Scripts
+
+| Command | Description |
+|---------|-------------|
+| `npm run dev` | Start only the Vite dev server |
+| `npm run dev:face` | Start only the DeepFace Docker container |
+| `npm run dev:all` | Start BOTH together (Vite + DeepFace) |
+| `npm run build` | Build for production |
+| `npm run preview` | Preview the production build |
 
 ---
 

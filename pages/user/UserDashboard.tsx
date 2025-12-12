@@ -138,9 +138,9 @@ export const UserDashboard = () => {
             )}
 
             {/* Top Gradient Banner */}
-            <div className="h-48 bg-gradient-to-r from-primary-900 via-primary-800 to-secondary-900 relative overflow-hidden">
+            <div className="h-48 bg-gradient-to-r from-primary-600 via-primary-700 to-indigo-700 dark:from-primary-900 dark:via-primary-800 dark:to-indigo-900 relative overflow-hidden">
                 <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
-                <div className="absolute -bottom-10 -right-10 w-64 h-64 bg-white/10 rounded-full blur-3xl"></div>
+                <div className="absolute -bottom-10 -right-10 w-64 h-64 bg-white/10 dark:bg-white/5 rounded-full blur-3xl"></div>
             </div>
 
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 -mt-24 relative z-10">
@@ -161,11 +161,11 @@ export const UserDashboard = () => {
                         <Link to="/Edit" className="absolute bottom-2 right-2 bg-white/90 dark:bg-gray-800/90 p-2 rounded-lg shadow-lg opacity-0 group-hover:opacity-100 transition text-xs font-bold hover:bg-white text-gray-800 dark:text-gray-200">Edit</Link>
                     </div>
                     <div className="flex-1 pb-2">
-                        <h1 className="text-3xl font-bold text-white mb-1 flex items-center gap-3">
+                        <h1 className="text-3xl font-bold text-white dark:text-gray-100 mb-1 flex items-center gap-3">
                             {user?.firstName} {user?.lastName}
-                            {isVerified && <CheckCircle className="text-green-400" fill="currentColor" size={24} stroke="black" />}
+                            {isVerified && <CheckCircle className="text-green-400 dark:text-green-300" fill="currentColor" size={24} stroke="black" />}
                         </h1>
-                        <p className="text-primary-100 flex items-center gap-2">
+                        <p className="text-primary-50 dark:text-gray-300 flex items-center gap-2">
                             <MapPin size={16} /> {user?.address?.city}, {user?.address?.state}
                         </p>
                     </div>

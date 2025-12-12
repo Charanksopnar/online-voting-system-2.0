@@ -1,9 +1,9 @@
 
 import React, { useMemo } from 'react';
 import { useRealtime } from '../../contexts/RealtimeContext';
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
-  PieChart, Pie, Cell 
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+  PieChart, Pie, Cell
 } from 'recharts';
 import { Users, UserCheck, Vote } from 'lucide-react';
 import { useTheme } from '../../contexts/ThemeContext';
@@ -13,9 +13,30 @@ export const AdminDashboard = () => {
   const { theme } = useTheme();
 
   // 1. KPIs
+  // Determine relevant election (Active > Ended (latest) > None)
+  const targetElection = useMemo(() => {
+    const active = elections.find(e => e.status === 'ACTIVE');
+    if (active) return active;
+
+    // Sort ended elections by date descending
+    const ended = elections
+      .filter(e => e.status === 'ENDED')
+      .sort((a, b) => new Date(b.endDate).getTime() - new Date(a.endDate).getTime());
+
+    return ended[0] || null;
+  }, [elections]);
+
+  const filteredVotes = useMemo(() => {
+    if (!targetElection) return [];
+    return votes.filter(v => v.electionId === targetElection.id);
+  }, [votes, targetElection]);
+
   const totalVoters = voters.length;
   const totalCandidates = candidates.length;
   const totalVotesCast = votes.length;
+  const votesCastCount = targetElection ? filteredVotes.length : 0;
+
+  const [showVotePercentage, setShowVotePercentage] = React.useState(false);
 
   // 2. Election Results
   const partyResults = useMemo(() => {
@@ -55,7 +76,7 @@ export const AdminDashboard = () => {
 
   return (
     <div className="space-y-6">
-      
+
       <div className="flex flex-col gap-1 mb-6">
         <h1 className="text-2xl font-bold text-slate-800 dark:text-white uppercase tracking-wide">Admin Dashboard</h1>
         <p className="text-sm text-slate-500">Welcome Administrator</p>
@@ -63,42 +84,67 @@ export const AdminDashboard = () => {
 
       {/* Row 1: KPI Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <KPICard 
-          title="Total Voters" 
-          value={totalVoters} 
-          icon={<Users size={24} className="text-indigo-600 dark:text-indigo-400"/>} 
+        <KPICard
+          title="Total Voters"
+          value={totalVoters}
+          icon={<Users size={24} className="text-indigo-600 dark:text-indigo-400" />}
           color="bg-white dark:bg-slate-800 border-l-4 border-indigo-500"
         />
-        <KPICard 
-          title="Total Candidates" 
-          value={totalCandidates} 
-          icon={<UserCheck size={24} className="text-emerald-600 dark:text-emerald-400"/>} 
+        <KPICard
+          title="Total Candidates"
+          value={totalCandidates}
+          icon={<UserCheck size={24} className="text-emerald-600 dark:text-emerald-400" />}
           color="bg-white dark:bg-slate-800 border-l-4 border-emerald-500"
         />
-        <KPICard 
-          title="Votes Cast" 
-          value={totalVotesCast} 
-          icon={<Vote size={24} className="text-amber-600 dark:text-amber-400"/>} 
-          color="bg-white dark:bg-slate-800 border-l-4 border-amber-500"
-        />
+        <div onDoubleClick={() => setShowVotePercentage(p => !p)} className="cursor-pointer select-none">
+          <KPICard
+            title={`Votes Cast ${targetElection ? `(${targetElection.status === 'ACTIVE' ? 'Live' : 'Last Ended'})` : ''}`}
+            value={
+              showVotePercentage
+                ? `${totalVoters > 0 ? ((votesCastCount / totalVoters) * 100).toFixed(1) : 0}%`
+                : `${votesCastCount} / ${totalVoters}`
+            }
+            icon={<Vote size={24} className="text-amber-600 dark:text-amber-400" />}
+            color="bg-white dark:bg-slate-800 border-l-4 border-amber-500"
+          />
+        </div>
       </div>
 
       {/* Row 2: Election Results & Leaders */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Bar Chart */}
         <div className="lg:col-span-2 bg-white dark:bg-slate-800 p-6 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm">
-          <h3 className="text-slate-800 dark:text-white font-bold mb-6">Election Results</h3>
+          <div className="flex items-center gap-3 mb-6">
+            <h3 className="text-slate-800 dark:text-white font-bold">Election Results</h3>
+            {targetElection && targetElection.status === 'ACTIVE' && (
+              <span className="flex items-center gap-1.5 px-2.5 py-1 bg-red-500/10 dark:bg-red-500/20 border border-red-500/30 rounded-full">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                </span>
+                <span className="text-xs font-semibold text-red-600 dark:text-red-400 uppercase tracking-wide">Live</span>
+              </span>
+            )}
+          </div>
           <div className="h-64 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={partyResults}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={theme === 'dark' ? '#334155' : '#e2e8f0'} />
-                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: CHART_TEXT, fontSize: 12}} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{fill: CHART_TEXT, fontSize: 12}} />
-                <Tooltip 
-                  cursor={{fill: theme === 'dark' ? '#334155' : '#f1f5f9', opacity: 0.4}}
+                <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fill: CHART_TEXT, fontSize: 12 }} dy={10} />
+                <YAxis axisLine={false} tickLine={false} tick={{ fill: CHART_TEXT, fontSize: 12 }} />
+                <Tooltip
+                  cursor={{ fill: theme === 'dark' ? '#334155' : '#f1f5f9', opacity: 0.4 }}
                   contentStyle={{ backgroundColor: CHART_BG, border: 'none', borderRadius: '8px', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)', color: theme === 'dark' ? '#fff' : '#1e293b' }}
                 />
-                <Bar dataKey="votes" fill="#6366f1" barSize={40} radius={[4, 4, 0, 0]} />
+                <Bar
+                  dataKey="votes"
+                  fill="#6366f1"
+                  barSize={40}
+                  radius={[4, 4, 0, 0]}
+                  isAnimationActive={true}
+                  animationDuration={500}
+                  animationEasing="ease-out"
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -112,7 +158,7 @@ export const AdminDashboard = () => {
               <div key={candidate.id} className="relative pt-1">
                 <div className="flex mb-2 items-center justify-between">
                   <div>
-                    <span className="text-xs font-semibold inline-block text-slate-700 dark:text-slate-200">
+                    <span className="text-xs font-semibold inline-block text-slate-700 dark:text-slate-200 capitalize">
                       {candidate.name}
                     </span>
                   </div>
@@ -158,12 +204,12 @@ export const AdminDashboard = () => {
               </PieChart>
             </ResponsiveContainer>
             <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <span className="text-2xl font-bold text-slate-800 dark:text-white">{totalVoters}</span>
+              <span className="text-2xl font-bold text-slate-800 dark:text-white">{totalVoters}</span>
             </div>
           </div>
           <div className="flex justify-center gap-4 text-xs text-slate-500 mt-2">
-             <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-indigo-500"></span> 18-25</span>
-             <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-pink-500"></span> 26+</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-indigo-500"></span> 18-25</span>
+            <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-pink-500"></span> 26+</span>
           </div>
         </div>
 
@@ -198,10 +244,10 @@ export const AdminDashboard = () => {
           <h3 className="text-slate-800 dark:text-white font-bold mb-4">Upcoming Elections</h3>
           <div className="space-y-4">
             {upcomingElections.map(e => (
-                <div key={e.id} className="bg-slate-50 dark:bg-slate-700/50 p-4 rounded-xl border-l-4 border-indigo-500">
-                    <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{e.title}</h4>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-1">{new Date(e.startDate).toLocaleString()}</p>
-                </div>
+              <div key={e.id} className="bg-slate-50 dark:bg-slate-700/50 p-4 rounded-xl border-l-4 border-indigo-500">
+                <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200 truncate">{e.title}</h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-mono mt-1">{new Date(e.startDate).toLocaleString()}</p>
+              </div>
             ))}
             {upcomingElections.length === 0 && <p className="text-slate-500 text-sm">No upcoming elections.</p>}
           </div>
@@ -214,8 +260,8 @@ export const AdminDashboard = () => {
 const KPICard = ({ title, value, icon, color }: any) => (
   <div className={`${color} p-6 rounded-2xl shadow-sm border border-slate-100 dark:border-slate-700 flex flex-col justify-between h-32`}>
     <div className="flex justify-between items-start">
-        {icon}
-        <span className="text-3xl font-bold text-slate-800 dark:text-white">{value}</span>
+      {icon}
+      <span className="text-3xl font-bold text-slate-800 dark:text-white">{value}</span>
     </div>
     <div className="text-sm font-medium text-slate-500 dark:text-slate-400">{title}</div>
   </div>

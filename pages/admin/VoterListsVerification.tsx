@@ -29,8 +29,10 @@ export const VoterListsVerification = () => {
         aadhaarNumber: '',
         epicNumber: '',
         fatherName: '',
+        dob: '',
         age: undefined,
         gender: '',
+        fullAddress: '',
         state: '',
         district: '',
         city: '',
@@ -55,27 +57,36 @@ export const VoterListsVerification = () => {
 
     // Robust Data Parser
     const processData = (rawData: any[]): OfficialVoter[] => {
+        console.log('Raw Data Preview:', rawData.slice(0, 2)); // Debug log
+
         return rawData.map(row => {
-            // Normalize keys to lowercase and trim
+            // Normalize keys to lowercase and trim, remove BOM if present
             const normalized: any = {};
             Object.keys(row).forEach(key => {
-                const cleanKey = key.toLowerCase().trim();
-                normalized[cleanKey] = row[key];
+                // Remove BOM and non-printable chars from key
+                const cleanKey = key.replace(/^\uFEFF/, '').trim().toLowerCase();
+                if (cleanKey) {
+                    normalized[cleanKey] = row[key];
+                }
             });
+
+            console.log('Normalized Row:', normalized); // Debug log
 
             // Map to OfficialVoter schema with fuzzy matching
             const voter: OfficialVoter = {
                 id: crypto.randomUUID(),
-                fullName: normalized['name'] || normalized['full name'] || normalized['voter name'] || normalized['candidate name'] || '',
-                fatherName: normalized['father'] || normalized['father name'] || normalized['relation name'] || normalized['guardian'] || '',
-                aadhaarNumber: String(normalized['aadhaar'] || normalized['aadhar'] || normalized['uid'] || normalized['aadhaar no'] || ''),
-                epicNumber: String(normalized['epic'] || normalized['epic no'] || normalized['voter id'] || normalized['id card'] || ''),
+                fullName: normalized['name'] || normalized['full name'] || normalized['voter name'] || normalized['candidate name'] || normalized['fullname'] || '',
+                fatherName: normalized['father'] || normalized['father name'] || normalized['relation name'] || normalized['guardian'] || normalized['fathername'] || '',
+                aadhaarNumber: String(normalized['aadhaar'] || normalized['aadhar'] || normalized['uid'] || normalized['aadhaar no'] || normalized['adhaarnumber'] || ''),
+                epicNumber: String(normalized['epic'] || normalized['epic no'] || normalized['voter id'] || normalized['id card'] || normalized['epicnumber'] || ''),
                 age: parseInt(normalized['age']) || undefined,
                 gender: normalized['gender'] || normalized['sex'] || '',
                 state: normalized['state'] || normalized['address state'] || '',
                 district: normalized['district'] || normalized['address district'] || '',
-                city: normalized['city'] || normalized['town'] || normalized['village'] || '',
-                pollingBooth: normalized['booth'] || normalized['polling booth'] || normalized['station'] || '',
+                city: normalized['city'] || normalized['town'] || normalized['village'] || normalized['address city'] || '',
+                pollingBooth: normalized['booth'] || normalized['polling booth'] || normalized['station'] || normalized['pollingbooth'] || '',
+                dob: normalized['dob'] || normalized['date of birth'] || normalized['birth date'] || normalized['birthdate'] || '',
+                fullAddress: normalized['address'] || normalized['full address'] || normalized['residence'] || normalized['location'] || '',
                 createdAt: new Date().toISOString()
             };
 
@@ -90,25 +101,47 @@ export const VoterListsVerification = () => {
         if (!file) return;
 
         setIsUploading(true);
+        console.log('Uploading file:', file.name, file.type, file.size);
+
         try {
             if (file.name.toLowerCase().endsWith('.csv')) {
                 Papa.parse(file, {
                     header: true,
                     skipEmptyLines: true,
+                    encoding: "UTF-8", // Ensure UTF-8 parsing
+                    transformHeader: (header) => {
+                        // Strip BOM and whitespace from headers immediately
+                        return header.replace(/^\uFEFF/, '').trim().toLowerCase();
+                    },
                     complete: async (results) => {
-                        const parsedData = processData(results.data);
-                        if (parsedData.length > 0) {
-                            await addOfficialVoters(parsedData);
-                            addNotification('SUCCESS', 'Import Successful', `Imported ${parsedData.length} voters from CSV.`);
-                        } else {
-                            addNotification('ERROR', 'Import Failed', 'No valid voter data found in CSV.');
+                        try {
+                            console.log('Papa Parse Results:', results);
+                            if (results.errors && results.errors.length > 0) {
+                                console.warn('CSV Parse Errors:', results.errors);
+                            }
+
+                            const parsedData = processData(results.data);
+                            console.log('Processed Data:', parsedData);
+
+                            if (parsedData.length > 0) {
+                                await addOfficialVoters(parsedData);
+                                addNotification('SUCCESS', 'Import Successful', `Imported ${parsedData.length} voters from CSV.`);
+                            } else {
+                                addNotification('ERROR', 'Import Failed', 'No valid voter data found in CSV. Please checks column headers.');
+                            }
+                        } catch (innerError: any) {
+                            console.error('Error processing CSV data:', innerError);
+                            addNotification('ERROR', 'Processing Error', `Failed to process CSV data: ${innerError.message}`);
+                        } finally {
+                            setIsUploading(false);
+                            if (fileInputRef.current) fileInputRef.current.value = '';
                         }
-                        setIsUploading(false);
                     },
                     error: (err) => {
-                        console.error(err);
-                        addNotification('ERROR', 'Import Failed', 'Failed to parse CSV file.');
+                        console.error('Papa Parse Error:', err);
+                        addNotification('ERROR', 'Import Failed', `Failed to parse CSV file: ${err.message}`);
                         setIsUploading(false);
+                        if (fileInputRef.current) fileInputRef.current.value = '';
                     }
                 });
             } else if (file.name.toLowerCase().match(/\.(xlsx|xls)$/)) {
@@ -120,31 +153,42 @@ export const VoterListsVerification = () => {
                         const wsname = wb.SheetNames[0];
                         const ws = wb.Sheets[wsname];
                         const data = XLSX.utils.sheet_to_json(ws);
+                        console.log('Excel Raw Data:', data);
+
                         const parsedData = processData(data);
 
                         if (parsedData.length > 0) {
                             await addOfficialVoters(parsedData);
                             addNotification('SUCCESS', 'Import Successful', `Imported ${parsedData.length} voters from Excel.`);
                         } else {
-                            addNotification('ERROR', 'Import Failed', 'No valid data found in Excel.');
+                            addNotification('ERROR', 'Import Failed', 'No valid data found in Excel. Check column headers.');
                         }
-                    } catch (e) {
-                        console.error(e);
-                        addNotification('ERROR', 'Import Failed', 'Invalid Excel file.');
+                    } catch (e: any) {
+                        console.error('Excel processing error:', e);
+                        addNotification('ERROR', 'Import Failed', `Invalid Excel file: ${e.message}`);
+                    } finally {
+                        setIsUploading(false);
+                        if (fileInputRef.current) fileInputRef.current.value = '';
                     }
+                };
+                reader.onerror = (e) => {
+                    console.error('FileReader error:', e);
+                    addNotification('ERROR', 'Read Failed', 'Failed to read file.');
                     setIsUploading(false);
+                    if (fileInputRef.current) fileInputRef.current.value = '';
                 };
                 reader.readAsBinaryString(file);
             } else {
                 addNotification('ERROR', 'Invalid File', 'Please upload a CSV or Excel file.');
                 setIsUploading(false);
+                if (fileInputRef.current) fileInputRef.current.value = '';
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error('Upload error:', error);
-            addNotification('ERROR', 'Upload Error', 'An unexpected error occurred during upload.');
+            addNotification('ERROR', 'Upload Error', `An unexpected error occurred: ${error.message}`);
             setIsUploading(false);
+            if (fileInputRef.current) fileInputRef.current.value = '';
         }
-        if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
     // Export to CSV
@@ -171,7 +215,7 @@ export const VoterListsVerification = () => {
         await addOfficialVoters([{ ...newRow, id: crypto.randomUUID() } as OfficialVoter]);
         setNewRow({
             fullName: '', aadhaarNumber: '', epicNumber: '', fatherName: '',
-            age: undefined, gender: '', state: '', district: '', city: '', pollingBooth: ''
+            dob: '', age: undefined, gender: '', fullAddress: '', state: '', district: '', city: '', pollingBooth: ''
         });
         setShowAddRow(false);
     };
@@ -217,7 +261,7 @@ export const VoterListsVerification = () => {
     };
 
     return (
-        <div className="min-h-screen">
+        <div className="min-h-screen transition-colors duration-200 bg-slate-50 dark:bg-slate-900 p-6">
             {/* Header */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
                 <div>
@@ -280,22 +324,22 @@ export const VoterListsVerification = () => {
                 <select
                     value={filterState}
                     onChange={e => { setFilterState(e.target.value); setFilterDistrict(''); }}
-                    className="input-standard py-2.5 px-3 min-w-[150px]"
+                    className="input-standard py-2.5 px-3 min-w-[150px] bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
                 >
-                    <option value="">All States</option>
+                    <option value="" className="dark:bg-slate-800">All States</option>
                     {Object.keys(INDIAN_STATES_DISTRICTS).map(s => (
-                        <option key={s} value={s}>{s}</option>
+                        <option key={s} value={s} className="dark:bg-slate-800">{s}</option>
                     ))}
                 </select>
                 <select
                     value={filterDistrict}
                     onChange={e => setFilterDistrict(e.target.value)}
                     disabled={!filterState}
-                    className="input-standard py-2.5 px-3 min-w-[150px] disabled:opacity-50"
+                    className="input-standard py-2.5 px-3 min-w-[150px] disabled:opacity-50 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100"
                 >
-                    <option value="">All Districts</option>
+                    <option value="" className="dark:bg-slate-800">All Districts</option>
                     {districtsForFilter.map(d => (
-                        <option key={d} value={d}>{d}</option>
+                        <option key={d} value={d} className="dark:bg-slate-800">{d}</option>
                     ))}
                 </select>
             </div>
@@ -310,8 +354,8 @@ export const VoterListsVerification = () => {
                         <input
                             placeholder="Full Name *"
                             value={newRow.fullName}
-                            onChange={e => setNewRow({ ...newRow, fullName: e.target.value })}
-                            className="input-standard"
+                            onChange={e => setNewRow({ ...newRow, fullName: e.target.value.replace(/\b\w/g, c => c.toUpperCase()) })}
+                            className="input-standard capitalize"
                         />
                         <input
                             placeholder="Aadhaar Number"
@@ -328,14 +372,21 @@ export const VoterListsVerification = () => {
                         <input
                             placeholder="Father's Name"
                             value={newRow.fatherName}
-                            onChange={e => setNewRow({ ...newRow, fatherName: e.target.value })}
-                            className="input-standard"
+                            onChange={e => setNewRow({ ...newRow, fatherName: e.target.value.replace(/\b\w/g, c => c.toUpperCase()) })}
+                            className="input-standard capitalize"
                         />
                         <input
                             type="number"
                             placeholder="Age"
                             value={newRow.age || ''}
                             onChange={e => setNewRow({ ...newRow, age: parseInt(e.target.value) || undefined })}
+                            className="input-standard w-20"
+                        />
+                        <input
+                            type="text"
+                            placeholder="DOB (YYYY-MM-DD)"
+                            value={newRow.dob || ''}
+                            onChange={e => setNewRow({ ...newRow, dob: e.target.value })}
                             className="input-standard"
                         />
                         <select
@@ -372,14 +423,20 @@ export const VoterListsVerification = () => {
                         <input
                             placeholder="City/Town"
                             value={newRow.city}
-                            onChange={e => setNewRow({ ...newRow, city: e.target.value })}
-                            className="input-standard"
+                            onChange={e => setNewRow({ ...newRow, city: e.target.value.replace(/\b\w/g, c => c.toUpperCase()) })}
+                            className="input-standard capitalize"
+                        />
+                        <input
+                            placeholder="Full Address"
+                            value={newRow.fullAddress || ''}
+                            onChange={e => setNewRow({ ...newRow, fullAddress: e.target.value })}
+                            className="input-standard col-span-2 capitalize"
                         />
                         <input
                             placeholder="Polling Booth"
                             value={newRow.pollingBooth}
-                            onChange={e => setNewRow({ ...newRow, pollingBooth: e.target.value })}
-                            className="input-standard"
+                            onChange={e => setNewRow({ ...newRow, pollingBooth: e.target.value.replace(/\b\w/g, c => c.toUpperCase()) })}
+                            className="input-standard capitalize"
                         />
                     </div>
                     <div className="flex gap-3 mt-4">
@@ -431,7 +488,7 @@ export const VoterListsVerification = () => {
                                                     className="input-standard text-sm py-1 px-2"
                                                 />
                                             ) : (
-                                                <span className="font-medium text-slate-800 dark:text-white">{voter.fullName}</span>
+                                                <span className="font-medium text-slate-800 dark:text-white capitalize">{voter.fullName}</span>
                                             )}
                                         </td>
                                         <td className="p-4 font-mono text-xs">
@@ -456,14 +513,18 @@ export const VoterListsVerification = () => {
                                                 <span className="bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-2 py-1 rounded">{voter.epicNumber || '-'}</span>
                                             )}
                                         </td>
-                                        <td className="p-4 text-slate-600 dark:text-slate-400">{voter.fatherName || '-'}</td>
+                                        <td className="p-4 text-slate-600 dark:text-slate-400 capitalize">{voter.fatherName || '-'}</td>
                                         <td className="p-4">
-                                            <div className="text-slate-700 dark:text-slate-300">{voter.age || '-'} yrs</div>
+                                            <div className="text-slate-700 dark:text-slate-300">
+                                                {voter.age ? `${voter.age} yrs` : ''}
+                                                {voter.dob && <span className="text-xs text-slate-500 block">{voter.dob}</span>}
+                                            </div>
                                             <div className="text-xs text-slate-500">{voter.gender || '-'}</div>
                                         </td>
                                         <td className="p-4">
-                                            <div className="text-slate-700 dark:text-slate-300 text-sm">{voter.state || '-'}</div>
-                                            <div className="text-xs text-slate-500">{voter.district}</div>
+                                            <div className="text-slate-700 dark:text-slate-300 text-sm capitalize">{voter.state || '-'}</div>
+                                            <div className="text-xs text-slate-500 capitalize">{voter.district}</div>
+                                            {voter.fullAddress && <div className="text-xs text-slate-400 mt-1 truncate max-w-[150px] capitalize" title={voter.fullAddress}>{voter.fullAddress}</div>}
                                         </td>
                                         <td className="p-4 text-xs text-slate-600 dark:text-slate-400">{voter.pollingBooth || '-'}</td>
                                         <td className="p-4">
