@@ -1,7 +1,7 @@
 
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { User, Candidate, Election, VoteTransaction, UserRole, VerificationStatus, FraudAlert, Region, OfficialVoter } from '../types';
-import { supabase } from '../supabase';
+import { supabaseVoter, supabaseAdmin, getSupabaseClient } from '../supabase';
 import { useNotification } from './NotificationContext';
 
 interface RealtimeContextType {
@@ -50,6 +50,15 @@ export const useRealtime = () => {
 
 export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
   const { addNotification } = useNotification();
+
+  // Helper to get the correct Supabase client based on current user role
+  const getClient = () => {
+    const cachedRole = localStorage.getItem('lastUserRole');
+    return cachedRole === 'ADMIN' ? supabaseAdmin : supabaseVoter;
+  };
+
+  // Alias for backward compatibility - defaults to voter client for read operations
+  const supabase = supabaseVoter;
 
   const [voters, setVoters] = useState<User[]>([]);
   const [candidates, setCandidates] = useState<Candidate[]>([]);
@@ -158,7 +167,10 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
     id: o.id,
     aadhaarNumber: o.aadhaar_number,
     epicNumber: o.epic_number,
-    fullName: o.full_name,
+    // Use full_name if available, otherwise combine first_name and last_name
+    fullName: o.full_name || (o.first_name && o.last_name ? `${o.first_name} ${o.last_name}`.trim() : o.first_name || ''),
+    firstName: o.first_name || o.full_name || '',
+    lastName: o.last_name,
     fatherName: o.father_name,
     age: o.age,
     gender: o.gender,
@@ -201,8 +213,13 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
         details: f.details
       })));
 
-      const { data: oData } = await supabase.from('official_voter_lists').select('*');
-      if (oData) setOfficialVoters(oData.map(mapOfficialVoter));
+      const { data: oData, error: oError } = await supabase.from('official_voter_lists').select('*');
+      if (oError) {
+        console.error('❌ Error fetching official voter lists:', oError);
+      } else {
+        console.log('✅ Loaded', oData?.length || 0, 'official voter records from database');
+        if (oData) setOfficialVoters(oData.map(mapOfficialVoter));
+      }
     };
     fetchData();
 
@@ -301,8 +318,17 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const deleteVoter = async (id: string) => {
+    // Delete from profiles table directly (auth.admin.deleteUser requires server-side privileges)
+    // The database should handle cascading deletes for related records via foreign key constraints
     const { error } = await supabase.from('profiles').delete().eq('id', id);
-    if (error) addNotification('ERROR', 'Delete Failed', error.message);
+
+    if (error) {
+      addNotification('ERROR', 'Delete Failed', error.message);
+      console.error('Error deleting voter:', error);
+    } else {
+      // The realtime subscription will automatically update the local state
+      addNotification('SUCCESS', 'Voter Deleted', 'Voter has been removed from the system.');
+    }
   };
 
   const addCandidate = async (candidate: Candidate) => {
@@ -415,46 +441,128 @@ export const RealtimeProvider = ({ children }: { children: ReactNode }) => {
   // --- OFFICIAL VOTER LISTS ACTIONS ---
 
   const addOfficialVoters = async (votersData: OfficialVoter[]) => {
-    // Check for existing voters to handle updates (Upsert Logic)
-    // We map incoming data to existing IDs if they match by Aadhaar or EPIC
-    const finalVoters = votersData.map(newVoter => {
+    console.log('🔄 addOfficialVoters called with', votersData.length, 'records');
+    console.log('📋 Sample incoming data:', votersData.slice(0, 2));
+
+    // Separate voters into updates and inserts
+    const toUpdate: OfficialVoter[] = [];
+    const toInsert: OfficialVoter[] = [];
+
+    votersData.forEach(newVoter => {
       const existing = officialVoters.find(existingVoter => {
+        // Only match if both values exist and are not empty
         const matchesAadhaar = newVoter.aadhaarNumber && existingVoter.aadhaarNumber &&
+          newVoter.aadhaarNumber.trim() !== '' && existingVoter.aadhaarNumber.trim() !== '' &&
           newVoter.aadhaarNumber.trim().toLowerCase() === existingVoter.aadhaarNumber.trim().toLowerCase();
+
         const matchesEpic = newVoter.epicNumber && existingVoter.epicNumber &&
+          newVoter.epicNumber.trim() !== '' && existingVoter.epicNumber.trim() !== '' &&
           newVoter.epicNumber.trim().toLowerCase() === existingVoter.epicNumber.trim().toLowerCase();
+
         return matchesAadhaar || matchesEpic;
       });
 
       if (existing) {
-        return { ...newVoter, id: existing.id }; // Use existing ID to trigger update
+        // Update existing record with new data, keeping the existing ID
+        toUpdate.push({ ...newVoter, id: existing.id });
+        console.log('📝 Will update existing record:', existing.id, newVoter.fullName,
+          `(matched by ${existing.aadhaarNumber === newVoter.aadhaarNumber ? 'Aadhaar' : 'EPIC'})`);
+      } else {
+        // Insert as new record
+        toInsert.push(newVoter);
+        console.log('➕ Will insert new record:', newVoter.fullName);
       }
-      return newVoter; // New ID (generated by parser) triggers insert
     });
 
-    const insertData = finalVoters.map(v => ({
-      id: v.id, // Include ID for upsert
-      aadhaar_number: v.aadhaarNumber,
-      epic_number: v.epicNumber,
-      full_name: v.fullName,
-      father_name: v.fatherName,
-      age: v.age,
-      gender: v.gender,
-      address_state: v.state,
-      address_district: v.district,
-      address_city: v.city,
-      polling_booth: v.pollingBooth,
-      dob: v.dob,
-      full_address: v.fullAddress
-    }));
+    console.log(`📊 ${toUpdate.length} records to update, ${toInsert.length} new records to insert`);
 
-    const { error } = await supabase.from('official_voter_lists').upsert(insertData, { onConflict: 'id' });
+    const client = getClient();
+    console.log('🔑 Using client for role:', localStorage.getItem('lastUserRole'));
 
-    if (error) {
-      addNotification('ERROR', 'Upload Failed', error.message);
+    let updateCount = 0;
+    let insertCount = 0;
+    let errorCount = 0;
+
+    // Update existing records
+    if (toUpdate.length > 0) {
+      console.log('🔄 Updating existing records...');
+      for (const voter of toUpdate) {
+        const { error } = await client.from('official_voter_lists').update({
+          aadhaar_number: voter.aadhaarNumber,
+          epic_number: voter.epicNumber,
+          full_name: voter.fullName,
+          first_name: voter.firstName || voter.fullName,
+          last_name: voter.lastName,
+          father_name: voter.fatherName,
+          age: voter.age,
+          gender: voter.gender,
+          address_state: voter.state,
+          address_district: voter.district,
+          address_city: voter.city,
+          polling_booth: voter.pollingBooth,
+          dob: voter.dob,
+          full_address: voter.fullAddress
+        }).eq('id', voter.id);
+
+        if (error) {
+          console.error('❌ Update error for voter:', voter.id, error);
+          errorCount++;
+        } else {
+          updateCount++;
+        }
+      }
+      console.log(`✅ Updated ${updateCount} records`);
+    }
+
+    // Insert new records using upsert to prevent duplicates
+    if (toInsert.length > 0) {
+      console.log('💾 Inserting new records...');
+      const insertData = toInsert.map(v => ({
+        aadhaar_number: v.aadhaarNumber,
+        epic_number: v.epicNumber,
+        full_name: v.fullName,
+        first_name: v.firstName || v.fullName,
+        last_name: v.lastName,
+        father_name: v.fatherName,
+        age: v.age,
+        gender: v.gender,
+        address_state: v.state,
+        address_district: v.district,
+        address_city: v.city,
+        polling_booth: v.pollingBooth,
+        dob: v.dob,
+        full_address: v.fullAddress
+      }));
+
+      // Use upsert with onConflict to handle duplicates at database level
+      // This prevents duplicates even if our client-side check misses something
+      const { error, data } = await client
+        .from('official_voter_lists')
+        .upsert(insertData, {
+          onConflict: 'aadhaar_number',
+          ignoreDuplicates: false
+        });
+
+      if (error) {
+        console.error('❌ Database error:', error);
+        errorCount += toInsert.length;
+      } else {
+        insertCount = toInsert.length;
+        console.log(`✅ Inserted ${insertCount} new records`);
+      }
+    }
+
+    // Show summary notification
+    if (errorCount > 0) {
+      addNotification('ERROR', 'Upload Completed with Errors',
+        `Updated: ${updateCount}, Inserted: ${insertCount}, Errors: ${errorCount}`);
     } else {
-      const updatedCount = finalVoters.filter(v => votersData.find(find => find.id === v.id && find.id !== v.id)).length; // Logic to count updates vs inserts is tricky here, simplifying msg
-      addNotification('SUCCESS', 'Import Processed', `Processed ${votersData.length} records (Inserted/Updated).`);
+      const message = updateCount > 0 && insertCount > 0
+        ? `Updated ${updateCount} existing records and inserted ${insertCount} new records.`
+        : updateCount > 0
+          ? `Updated ${updateCount} existing records.`
+          : `Inserted ${insertCount} new records.`;
+      addNotification('SUCCESS', 'Import Successful', message);
     }
   };
 

@@ -1,0 +1,1037 @@
+=====================================================================
+EVOTE 2.0 SYSTEM - COMPREHENSIVE ANALYSIS AND SOLUTIONS
+=====================================================================
+Date: January 2026
+Project Type: Electronic Voting System with AI-Based Face Verification
+Tech Stack: React + TypeScript, Supabase PostgreSQL, DeepFace Docker, Gemini AI OCR
+
+=====================================================================
+EXECUTIVE SUMMARY
+=====================================================================
+
+CRITICAL ISSUES IDENTIFIED:
+1. Broken Face Verification Workflow During Voting
+2. Incomplete Electoral Roll Verification System
+3. Missing Admin Controls for Voter Management
+4. Inconsistent Verification Status Logic
+5. No Real-Time Face Comparison at Voting
+6. Weak Biometric Security During Registration
+7. Missing Proper Database Constraints and Triggers
+8. Insufficient Audit Trail and Logging
+9. No Voter Re-verification Mechanism
+10. Incomplete Error Handling and User Feedback
+
+The system has fundamental architectural flaws in the voter verification 
+and authentication flow. While registration captures face data, the voting 
+process does not properly compare live faces with stored embeddings in real-time.
+
+
+=====================================================================
+SECTION 1: REGISTRATION FLOW PROBLEMS
+=====================================================================
+
+FILE: pages/Signup.tsx
+
+PROBLEM 1.1: Face Embeddings Not Properly Stored During Registration
+SEVERITY: CRITICAL
+LOCATION: Line 315-370 (handleSubmit function)
+ISSUE:
+The registration flow captures face images and calls getEmbeddingForBase64Image 
+but does not validate if embeddings are actually stored in the profile. The trigger 
+in supabase_schema.sql creates profiles automatically but does NOT include face 
+embeddings at creation time since they are computed AFTER user creation.
+
+SPECIFIC LOGIC FLAW:
+1. User signs up with email/password
+2. Supabase auth.users entry created
+3. Trigger creates profiles entry with NULL face_embeddings
+4. Face capture and embedding generation happens
+5. Update to profiles with face_embeddings occurs
+6. BUT no validation if update succeeded
+
+SOLUTION 1.1:
+Registration Flow Modification
+In Signup.tsx handleSubmit function, after signUp completes:
+Add explicit validation step to check if face embeddings were saved
+Query the profiles table immediately after update to confirm face_embeddings is not null
+If embeddings are null or empty array, show error and require re-capture
+Do not proceed to UserDashboard until embeddings are confirmed stored
+Add retry mechanism with maximum 3 attempts
+
+
+PROBLEM 1.2: Automatic Verification Status Assignment is Flawed
+SEVERITY: HIGH
+LOCATION: Line 420-480 (Electoral Roll and Biometric Verification)
+ISSUE:
+The code has complex nested logic for determining verification status that can 
+result in users being auto-verified when they should require manual review.
+
+FLAWED LOGIC FLOW:
+Step 1: Electoral roll check may pass or fail
+Step 2: Biometric AI verification against ID document
+Step 3: Final status computed based on both
+BUT: If electoral roll not found, user still gets PENDING status even if 
+biometric failed, allowing them potential access
+
+SOLUTION 1.2:
+Implement Strict Verification State Machine
+Create clear state transitions with no ambiguity
+States: NOT_STARTED > PENDING_ELECTORAL > PENDING_BIOMETRIC > VERIFIED
+Each state requires specific checks to pass
+Electoral roll verification MUST pass before biometric can auto-verify
+If either fails, manual review required (PENDING_MANUAL state)
+Add verification_stage column to track which stage failed
+Update profiles table to include verification_stage text field
+
+
+PROBLEM 1.3: Duplicate Prevention is Incomplete
+SEVERITY: HIGH
+LOCATION: Line 245-280 (Duplicate Aadhaar and EPIC checks)
+ISSUE:
+Duplicate checks happen BEFORE face registration. A user could bypass by:
+Registering with valid Aadhaar
+Failing face capture intentionally
+Registering again with same Aadhaar and different email
+First record remains with no face data but occupies Aadhaar
+
+SOLUTION 1.3:
+Implement Transaction-Based Registration
+Wrap entire signup in database transaction
+Check duplicates again AFTER face embeddings computed
+Use SELECT FOR UPDATE to lock profile record
+If face registration fails, rollback entire user creation
+Add unique constraints on aadhaar_number and epic_number in database
+Implement cleanup job to remove incomplete registrations after 24 hours
+
+
+PROBLEM 1.4: OCR Auto-fill Not Validating Data Quality
+SEVERITY: MEDIUM
+LOCATION: Line 180-220 (handleAadhaarUpload and extractIdData)
+ISSUE:
+OCR extraction may produce incorrect or garbled data but is accepted without 
+validation. User may not notice auto-filled incorrect date of birth or name.
+
+SOLUTION 1.4:
+Add OCR Data Validation Layer
+After OCR extraction, show highlighted diff comparison UI
+Require user to explicitly confirm or correct each extracted field
+Validate format of extracted data: DOB should be valid date, Aadhaar should be 12 digits
+Flag suspicious extractions: names with numbers, invalid dates
+Add manual override option with warning
+
+
+=====================================================================
+SECTION 2: VOTING FLOW CRITICAL PROBLEMS
+=====================================================================
+
+FILE: pages/user/VotingPage.tsx
+
+PROBLEM 2.1: Face Verification Not Actually Comparing with Database
+SEVERITY: CRITICAL - SECURITY VULNERABILITY
+LOCATION: Line 95-180 (initiateVote and handleVerificationComplete)
+ISSUE:
+The voting page checks if user has faceEmbeddings property, opens camera for 
+liveness capture, sends frames to verifyFace function BUT the comparison is 
+happening entirely on CLIENT SIDE using stored embeddings fetched from database.
+
+This means:
+A malicious user could modify their stored embeddings in the database
+The comparison threshold is hardcoded client-side and can be bypassed
+No server-side validation of the match occurring
+Risk of replay attacks using pre-captured images
+
+CRITICAL SECURITY FLAW:
+Line 135: verifyFace is called with user.faceEmbeddings
+Line 145: Match decision made entirely in browser
+Line 160: Vote is cast if client-side verification passes
+No server-side double-check happening
+
+SOLUTION 2.1:
+Implement Server-Side Face Verification Endpoint
+Create new Supabase Edge Function: verify-voter-face
+Function accepts: voter_id, election_id, live_frame_base64
+Function performs:
+  Fetch stored embeddings from profiles table using voter_id
+  Call DeepFace to get embedding for live_frame
+  Compute distance on server side
+  Log verification attempt to fraud_alerts table
+  Return signed verification token with expiry timestamp
+Modify VotingPage to:
+  Send verification request to Edge Function
+  Receive signed token
+  Submit vote with verification token
+  Backend validates token before accepting vote
+Add verification_token column to votes table
+Add token_expires_at timestamp column
+
+
+PROBLEM 2.2: Multiple Voting Prevention Not Robust
+SEVERITY: CRITICAL
+LOCATION: Line 60-70 (hasVoted check)
+ISSUE:
+The hasVoted check is only done on initial page load from client-side state.
+A user could:
+Vote once
+Refresh the page immediately
+If realtime sync is slow, vote again before state updates
+Race condition in vote insertion
+
+SOLUTION 2.2:
+Implement Database-Level Unique Constraint
+Already exists: votes_election_voter_unique in schema
+BUT: Need to handle constraint violation gracefully
+Modify castVote function in RealtimeContext to:
+  Use try-catch for unique constraint violation
+  Return specific error code for duplicate vote
+  Show user-friendly message instead of generic error
+Add additional check in Edge Function:
+  Query votes table for existing vote before processing
+  Use SELECT FOR UPDATE to lock during verification
+Add vote_attempt_id to track multiple attempts
+
+
+PROBLEM 2.3: Security Violation Handling is Insufficient
+SEVERITY: MEDIUM
+LOCATION: Line 70-95 (BackscreenCapture and handleViolation)
+ISSUE:
+System detects tab switches and window blur but:
+Does not actually block voting after violations
+Relies on client-side counter that can be reset
+Does not prevent page reload to clear violations
+Fraud alerts logged but not acted upon
+
+SOLUTION 2.3:
+Implement Session-Based Violation Tracking
+Create voting_sessions table with columns:
+  session_id, voter_id, election_id, violation_count, started_at, blocked_at
+Start session when user enters VotingPage
+Increment violations in database, not just local state
+After 3 violations, set blocked_at timestamp
+Check session status before allowing vote submission
+Block user from re-entering VotingPage for same election for 30 minutes
+Admin dashboard shows active blocked sessions
+
+
+PROBLEM 2.4: Face Verification Retry Logic Allows Brute Force
+SEVERITY: HIGH
+LOCATION: Line 48-55 (MAX_FAILED_ATTEMPTS and failedAttempts)
+ISSUE:
+User gets 3 attempts per session but:
+Can reload page to reset attempts
+5 second cooldown is too short
+No IP-based rate limiting
+Could use different photos until one matches threshold
+
+SOLUTION 2.4:
+Implement Permanent Attempt Tracking
+Track failed attempts in database per user per election
+Add face_verification_attempts table:
+  voter_id, election_id, attempt_count, last_attempt_at, blocked_until
+Increment on each failed verification
+Block for exponential backoff: 5 min, 15 min, 1 hour, 24 hours
+Show remaining time to user
+Admin can reset attempts manually
+Log all attempts with timestamp and confidence score
+
+
+=====================================================================
+SECTION 3: FACE SERVICE VULNERABILITIES
+=====================================================================
+
+FILE: services/faceService.ts
+
+PROBLEM 3.1: Face Embedding Comparison Logic is Weak
+SEVERITY: HIGH
+LOCATION: Line 95-110 (computeDistance and distanceToConfidence)
+ISSUE:
+Distance to confidence conversion uses arbitrary formula
+Threshold of 10.0 is not scientifically justified
+Different face images of same person may exceed threshold
+No consideration for image quality or lighting conditions
+
+SOLUTION 3.1:
+Implement Multi-Factor Face Verification
+Use multiple similarity metrics:
+  Euclidean distance (current)
+  Cosine similarity
+  Deep learning confidence score from DeepFace
+Combine scores with weighted average
+Add image quality checks before verification:
+  Brightness level
+  Blur detection
+  Face size in frame
+Adjust threshold dynamically based on image quality
+Store quality metrics with each verification attempt
+
+
+PROBLEM 3.2: Liveness Detection is Trivial to Bypass
+SEVERITY: CRITICAL
+LOCATION: Line 25-45 (checkLiveness function)
+ISSUE:
+Liveness check only validates:
+Frames are different from each other
+At least 3 frames captured
+Does NOT detect:
+  Video playback (someone holding phone to camera)
+  Photo animation (slight movements applied to static image)
+  Deep fake videos
+  Pre-recorded sequences
+
+SOLUTION 3.2:
+Implement Advanced Liveness Detection
+Replace client-side frame comparison with server-side analysis
+Use DeepFace anti-spoofing models
+Check for:
+  Natural micro-expressions
+  Pupil dilation changes
+  Skin texture variations
+  3D face depth mapping
+Require random challenges during capture:
+  Blink twice
+  Turn head to random direction shown on screen
+  Smile
+Use challenge-response to prevent replay attacks
+Add passive liveness: detect screen reflections in eyes
+
+
+PROBLEM 3.3: DeepFace Backend Health Check is Not Enforced
+SEVERITY: MEDIUM
+LOCATION: Line 245-255 (checkBackendHealth function)
+ISSUE:
+Health check happens on page load but:
+If backend goes down mid-verification, no handling
+No retry mechanism for transient failures
+User sees generic error message
+
+SOLUTION 3.3:
+Implement Robust Backend Communication
+Add automatic retry with exponential backoff
+Implement circuit breaker pattern
+After 3 consecutive failures, show maintenance mode
+Queue verification requests if backend temporarily unavailable
+Add backend health status indicator in UI
+Admin dashboard shows DeepFace service status
+Send alerts to admin if service down for more than 5 minutes
+
+
+PROBLEM 3.4: Face Embedding Storage Has No Integrity Protection
+SEVERITY: HIGH
+LOCATION: Database storage of face_embeddings in profiles table
+ISSUE:
+Embeddings stored as JSONB array with no:
+Checksum or hash validation
+Encryption at rest
+Tampering detection
+Version control
+
+SOLUTION 3.4:
+Implement Embedding Integrity Protection
+Add face_embedding_hash column storing SHA256 of embeddings array
+Compute hash whenever embeddings are stored
+Verify hash before using embeddings for verification
+Encrypt embeddings using Supabase vault or app-level encryption
+Add face_embedding_version column to track model changes
+If DeepFace model updated, flag old embeddings for re-capture
+Add face_embedding_created_at timestamp
+
+
+=====================================================================
+SECTION 4: ADMIN MANAGEMENT PROBLEMS
+=====================================================================
+
+FILE: pages/admin/VotersManagement.tsx
+
+PROBLEM 4.1: Electoral Roll Verification Lacks Admin Override
+SEVERITY: MEDIUM
+LOCATION: Line 120-150 (Electoral Roll verification UI)
+ISSUE:
+Admin can see verification status but cannot:
+Manually mark as verified if automatic check failed
+Override rejections with justification
+Add notes about verification decisions
+Re-trigger verification after data correction
+
+SOLUTION 4.1:
+Add Admin Verification Controls
+Add "Force Verify" button with required justification text field
+Add "Request Re-verification" button to ask user to update info
+Show verification history timeline
+Display exact reason for automatic rejection
+Allow admin to override electoral roll requirement with approval workflow
+Log all admin actions with reason and timestamp
+Add verification_override_reason column to profiles
+
+
+PROBLEM 4.2: No Bulk Operations for Voter Management
+SEVERITY: MEDIUM
+LOCATION: Entire VotersManagement.tsx component
+ISSUE:
+Admin must handle voters one by one
+No way to approve multiple pending verifications at once
+Cannot bulk export voter data for reporting
+No filters for verification issues
+
+SOLUTION 4.2:
+Implement Bulk Operations Interface
+Add checkbox selection for multiple voters
+Bulk actions menu: Approve All, Reject All, Export Selected
+Advanced filters:
+  Verification status
+  Electoral roll verification status
+  Missing documents
+  Failed biometric checks
+Export to CSV/Excel with all voter details
+Bulk re-verification trigger for selected voters
+
+
+PROBLEM 4.3: Voter Deletion is Permanent with No Audit Trail
+SEVERITY: HIGH
+LOCATION: Line 130-135 (handleDeleteClick and confirmDelete)
+ISSUE:
+Deleting voter removes all data permanently
+No soft delete option
+No audit trail of who deleted which voter
+Cannot restore accidentally deleted voters
+
+SOLUTION 4.3:
+Implement Soft Delete with Audit Trail
+Add deleted_at timestamp column to profiles
+Add deleted_by admin_id column
+deleteVoter should set deleted_at instead of removing row
+Add deleted_reason required text field
+Filter out deleted voters from normal queries
+Admin can view deleted voters in separate tab
+Add restore functionality for admins
+Permanently delete only after 90 days retention period
+
+
+FILE: pages/admin/KycReview.tsx
+
+PROBLEM 4.4: KYC Review Interface Lacks Side-by-Side Comparison
+SEVERITY: MEDIUM
+LOCATION: Line 60-150 (KYC review card UI)
+ISSUE:
+Admin reviews documents separately:
+Aadhaar document in one tab
+Face photo in another tab
+Electoral roll data elsewhere
+Cannot compare face on ID with captured face
+
+SOLUTION 4.4:
+Create Integrated Review Dashboard
+Split-screen view: ID document on left, face capture on right
+Automatic face detection and highlighting on ID document
+Side-by-side face comparison with similarity score
+Show extracted OCR data alongside manual entry
+Highlight mismatches in red
+Show electoral roll match details inline
+One-click approve/reject with quick notes
+
+
+PROBLEM 4.5: No Notification to Users About Verification Status
+SEVERITY: MEDIUM
+LOCATION: Entire KycReview.tsx workflow
+ISSUE:
+Admin approves or rejects but:
+User not notified automatically
+Must log in to check status
+No email notification
+No SMS alert
+
+SOLUTION 4.5:
+Implement Status Change Notifications
+Send email when verification status changes
+Include reason for rejection with instructions to fix
+Send SMS notification for important status changes
+Add notification preferences for users
+Create notification templates for different scenarios
+Log all sent notifications in notifications table
+
+
+=====================================================================
+SECTION 5: DATABASE SCHEMA ISSUES
+=====================================================================
+
+FILE: supabase_schema.sql
+
+PROBLEM 5.1: profiles.verification_status Has No Transition Validation
+SEVERITY: MEDIUM
+LOCATION: Line 50-55 (verification_status column)
+ISSUE:
+Status can be changed from any state to any state
+No enforcement of valid transitions
+Could jump from NOT_STARTED to VERIFIED
+No timestamp tracking for status changes
+
+SOLUTION 5.1:
+Implement Status Transition Validation
+Create verification_status_history table:
+  id, profile_id, old_status, new_status, changed_by, changed_at, reason
+Add before update trigger on profiles to validate transitions
+Valid transitions only:
+  NOT_STARTED > PENDING
+  PENDING > VERIFIED or REJECTED
+  REJECTED > PENDING (on resubmission)
+  VERIFIED > PENDING (on admin re-review request)
+Log every status change with reason
+Prevent direct update of verification_status without logging
+
+
+PROBLEM 5.2: Missing Indices on Critical Query Columns
+SEVERITY: MEDIUM
+LOCATION: Line 220-250 (Index definitions)
+ISSUE:
+No compound indices for common filter combinations
+Electoral roll lookups may be slow
+Verification queue queries not optimized
+
+SOLUTION 5.2:
+Add Performance Indices
+Create compound index on profiles verification_status, electoral_roll_verified
+Create index on official_voter_lists lower(full_name), address_state
+Create index on votes election_id, created_at for results aggregation
+Create index on fraud_alerts voter_id, risk_level, timestamp
+Analyze query patterns and add indices accordingly
+
+
+PROBLEM 5.3: votes Table Lacks Vote Integrity Checks
+SEVERITY: HIGH
+LOCATION: Line 95-120 (votes table definition)
+ISSUE:
+Vote can be inserted without verifying:
+Voter eligibility at time of vote
+Election is actually active
+Candidate belongs to this election
+Voter is not blocked
+
+SOLUTION 5.3:
+Add Vote Validation Trigger
+Create before insert trigger on votes table
+Check voter_id in profiles:
+  verification_status must be VERIFIED
+  is_blocked must be false
+  electoral_roll_verified must be true
+Check election_id in elections:
+  status must be ACTIVE
+  current timestamp between start_date and end_date
+Check candidate_id in candidates:
+  must belong to this election_id
+Raise exception if any validation fails
+Log failed vote attempts to fraud_alerts
+
+
+PROBLEM 5.4: No Automatic Election Status Updates
+SEVERITY: MEDIUM
+LOCATION: Line 75-85 (elections table)
+ISSUE:
+Election status must be manually changed
+No automatic transition from UPCOMING to ACTIVE
+No automatic transition from ACTIVE to ENDED
+Results may be viewed while voting ongoing
+
+SOLUTION 5.4:
+Create Election Status Update Job
+Add PostgreSQL cron extension
+Create function update_election_status
+Runs every minute
+Updates status based on current timestamp vs start_date and end_date
+Trigger realtime notification on status change
+Automatically close voting when end_date reached
+Prevent vote casting after transition to ENDED
+
+
+PROBLEM 5.5: official_voter_lists Has No Deduplication
+SEVERITY: MEDIUM
+LOCATION: Line 150-180 (official_voter_lists table)
+ISSUE:
+Admins can upload same electoral roll multiple times
+No unique constraints on aadhaar_number or epic_number
+Duplicate entries cause verification confusion
+
+SOLUTION 5.5:
+Add Electoral Roll Data Integrity
+Create unique constraint on epic_number where not null
+Create unique constraint on aadhaar_number where not null
+Add uploaded_batch_id to track which upload batch
+Add uploaded_by admin_id
+Add validation before insert
+Provide duplicate report during upload
+Allow admin to choose: skip, update, or error on duplicates
+
+
+=====================================================================
+SECTION 6: ELECTORAL ROLL VERIFICATION SERVICE ISSUES
+=====================================================================
+
+FILE: services/electoralRollService.ts
+
+PROBLEM 6.1: Name Matching Algorithm Too Simplistic
+SEVERITY: MEDIUM
+LOCATION: Line 60-110 (calculateSimilarity function)
+ISSUE:
+Levenshtein distance does not handle:
+Name order variations: "John Smith" vs "Smith John"
+Middle name presence/absence
+Nicknames: "Bob" vs "Robert"
+Spelling variations: "Mohammad" vs "Mohammed"
+
+SOLUTION 6.1:
+Implement Advanced Name Matching
+Use phonetic matching: Soundex or Metaphone algorithm
+Split names into tokens and match individual parts
+Account for common nicknames and variations
+Use fuzzy matching with configurable threshold
+Consider cultural naming patterns
+Add manual mapping table for known aliases
+Log match confidence score for admin review
+
+
+PROBLEM 6.2: Address Matching Requires 67% Match
+SEVERITY: LOW
+LOCATION: Line 185-205 (address matching logic)
+ISSUE:
+State/District/City must match 2 out of 3
+City name spelling may vary: "Bengaluru" vs "Bangalore"
+Districts may be reorganized over time
+Addresses may be outdated in electoral roll
+
+SOLUTION 6.2:
+Improve Address Matching Logic
+Use fuzzy matching for city names
+Maintain alias table for city name variations
+Match at pincode level if available
+Consider parent district for newly created districts
+Lower address weight in overall match score
+Add address_match_details JSON to show exact mismatches
+
+
+PROBLEM 6.3: DOB Matching is Exact Match Only
+SEVERITY: MEDIUM
+LOCATION: Line 175 (dobMatch calculation)
+ISSUE:
+Single character difference in date format fails match
+Electoral roll may have DOB as DD-MM-YYYY
+User entry may be YYYY-MM-DD
+Typos in date entry cause rejection
+
+SOLUTION 6.3:
+Add Flexible Date Matching
+Parse dates in multiple formats
+Allow 1 day difference for data entry errors
+Check if year and month match even if day differs
+Add date_match_confidence score
+Highlight date mismatch clearly to admin
+Prompt user to verify date if low confidence
+
+
+PROBLEM 6.4: No Handling of Multiple Matches
+SEVERITY: MEDIUM
+LOCATION: Line 135-140 (query.limit(1).single())
+ISSUE:
+If multiple electoral roll entries match same Aadhaar:
+Only first match returned
+User may have registered in multiple constituencies
+No indication of duplicate electoral entries
+
+SOLUTION 6.4:
+Handle Multiple Electoral Entries
+Remove .single() call and get all matches
+If multiple matches found:
+  Return all matches with scores
+  Let admin choose correct match
+  Flag as duplicate for investigation
+Add electoral_roll_matches array to store all potential matches
+Show all matches in admin review interface
+
+
+=====================================================================
+SECTION 7: REAL-TIME CONTEXT PROBLEMS
+=====================================================================
+
+FILE: contexts/RealtimeContext.tsx
+
+PROBLEM 7.1: Supabase Client Selection Logic is Flawed
+SEVERITY: HIGH
+LOCATION: Line 45-50 (getClient function)
+ISSUE:
+Client selection based on localStorage cached role
+Role may change but localStorage not updated
+Voter could get admin client permissions
+Race conditions on role change
+
+SOLUTION 7.1:
+Fix Client Authentication Logic
+Always use authenticated user's role from current session
+Call supabase.auth.getUser() to get current user
+Check user.user_metadata.role or query profiles table
+Create client instance per request with proper auth
+Remove localStorage caching of role
+Add role validation middleware for all admin operations
+
+
+PROBLEM 7.2: No Error Handling in Data Fetch
+SEVERITY: MEDIUM
+LOCATION: Line 200-220 (useEffect fetchData)
+ISSUE:
+Initial data fetch has no error handling
+If database connection fails on load, app crashes
+No retry mechanism
+No offline mode
+
+SOLUTION 7.2:
+Add Robust Error Handling
+Wrap fetchData in try-catch
+Implement exponential backoff retry
+Show error message to user if fetch fails
+Add offline detection
+Cache last successful data in IndexedDB
+Load from cache if network unavailable
+Show "working offline" indicator
+
+
+PROBLEM 7.3: Realtime Subscriptions Not Cleaned Up Properly
+SEVERITY: LOW
+LOCATION: Line 250-300 (subscription setup)
+ISSUE:
+Subscriptions created but cleanup may be incomplete
+On component unmount, subscriptions should stop
+Memory leaks if subscriptions not unsubscribed
+Multiple subscriptions if context remounts
+
+SOLUTION 7.3:
+Implement Proper Subscription Cleanup
+Store subscription objects in refs
+Return cleanup function from useEffect
+Call unsubscribe on all channels
+Add connection state tracking
+Reconnect subscriptions on network restore
+Log subscription status for debugging
+
+
+PROBLEM 7.4: Vote Casting Has No Optimistic Updates
+SEVERITY: LOW
+LOCATION: Line 400-420 (castVote function)
+ISSUE:
+User must wait for database response
+UI does not update until confirmation
+Slow networks cause poor experience
+
+SOLUTION 7.4:
+Implement Optimistic UI Updates
+Immediately add vote to local state
+Show provisional vote indicator
+Update candidates.votes count locally
+Revert if database operation fails
+Show sync status indicator
+Add conflict resolution for concurrent updates
+
+
+=====================================================================
+SECTION 8: MISSING FEATURES AND ENHANCEMENTS
+=====================================================================
+
+PROBLEM 8.1: No Voter Re-verification Mechanism
+SEVERITY: MEDIUM
+ISSUE:
+Once verified, voter never re-verified
+Face changes over time: aging, injury, surgery
+Stored embeddings become outdated
+No periodic re-capture requirement
+
+SOLUTION 8.1:
+Implement Periodic Re-verification
+Add face_embedding_expires_at timestamp
+Require re-verification every 2 years
+Show "verification expiring" warning 30 days before
+Block voting if expired
+Allow early voluntary re-verification
+Admin can extend expiry with justification
+
+
+PROBLEM 8.2: No Multi-Factor Authentication
+SEVERITY: HIGH
+ISSUE:
+Voting relies solely on face verification
+If face verification bypassed, no second factor
+No SMS OTP option
+No email verification during voting
+
+SOLUTION 8.2:
+Add Multi-Factor Authentication
+Require SMS OTP after face verification passes
+Send OTP to registered phone number
+Add email verification link option
+Support authenticator app TOTP
+Add security questions as backup
+User chooses MFA method in settings
+
+
+PROBLEM 8.3: No Voter Identity Change Handling
+SEVERITY: MEDIUM
+ISSUE:
+If voter legally changes name, no update process
+Marriage name changes not accommodated
+Gender transition updates not supported
+Re-registration required loses voting history
+
+SOLUTION 8.3:
+Create Identity Update Workflow
+Add identity_change_requests table
+User submits legal document showing name change
+Admin reviews and approves
+Update profile while maintaining history
+Link old identity to new identity
+Preserve vote history across identity changes
+Add identity_version tracking
+
+
+PROBLEM 8.4: No Geographic Restrictions on Voting
+SEVERITY: MEDIUM
+ISSUE:
+Voter can vote from any location
+Regional elections should restrict by voter address
+No IP geolocation check
+No device location verification
+
+SOLUTION 8.4:
+Implement Location-Based Restrictions
+Check voter.address.state matches election.regionState
+Require location permission during voting
+Verify GPS coordinates against registered address
+Allow location override with additional verification
+Log voting location for audit
+Flag suspicious location changes
+
+
+PROBLEM 8.5: No Candidate Withdrawal Handling
+SEVERITY: LOW
+ISSUE:
+If candidate withdraws after election starts
+Votes already cast for them still count
+No way to transfer votes
+Results show withdrawn candidates
+
+SOLUTION 8.5:
+Add Candidate Status Management
+Add candidates.status column: ACTIVE, WITHDRAWN, DISQUALIFIED
+Update candidate management UI
+Show withdrawn status during voting
+Prevent new votes for withdrawn candidates
+Maintain vote count history
+Add candidate_status_history table
+
+
+=====================================================================
+SECTION 9: SECURITY RECOMMENDATIONS
+=====================================================================
+
+RECOMMENDATION 9.1: Implement Rate Limiting
+Add rate limiting on:
+Login attempts: 5 per 15 minutes
+Face verification attempts: 3 per hour
+Vote submission: 1 per election
+Admin actions: 100 per hour
+Use Supabase Edge Functions or external service
+
+RECOMMENDATION 9.2: Add Comprehensive Audit Logging
+Create audit_logs table tracking:
+All profile changes with before/after values
+All admin actions with justification
+All vote attempts including failed ones
+All face verification attempts
+All login/logout events
+Retention: 7 years for compliance
+
+RECOMMENDATION 9.3: Implement Data Encryption
+Encrypt sensitive data at rest:
+Face embeddings
+ID document images
+Personal information
+Use Supabase Vault or application-level encryption
+Rotate encryption keys periodically
+
+RECOMMENDATION 9.4: Add Anomaly Detection
+Monitor for suspicious patterns:
+Multiple failed verifications from same IP
+Rapid vote attempts
+Unusual login locations
+Multiple accounts from same device
+Flag for admin investigation
+
+RECOMMENDATION 9.5: Secure DeepFace Communication
+Use HTTPS for all DeepFace API calls
+Add API key authentication
+Implement request signing
+Validate response integrity
+Add request/response logging
+
+
+=====================================================================
+SECTION 10: SUPABASE SETUP SCRIPT FIXES
+=====================================================================
+
+FILE: supabase_schema.sql
+
+ISSUE 10.1: Trigger Function Does Not Handle Face Embeddings
+LOCATION: Line 600-650 (handle_new_user function)
+PROBLEM:
+Trigger creates profile but does not:
+Initialize face_embeddings as empty array
+Set liveness_verified to false
+Initialize face_embedding_version
+
+SOLUTION:
+Modify handle_new_user function to:
+Set face_embeddings to empty array in JSONB format
+Set liveness_verified to false explicitly
+Set face_embedding_version to 1
+Set face_embedding_created_at to null
+Add face_embedding_hash as null initially
+
+
+ISSUE 10.2: RLS Policies Too Permissive
+LOCATION: Line 400-500 (RLS policies)
+PROBLEM:
+Policy "Public profiles are viewable by everyone" allows:
+Anyone to see all face_embeddings
+Anyone to see personal ID numbers
+Anyone to see verification status
+
+SOLUTION:
+Modify profiles SELECT policy to exclude sensitive columns
+Create view public_profiles with only safe columns:
+  id, first_name, last_name, photo_url, role
+Create separate admin_profiles view with full access
+Update policies to use views instead of direct table access
+Hide face_embeddings, face_url, kyc_doc_url from public
+Only profile owner and admins can see sensitive data
+
+
+ISSUE 10.3: Missing Backup and Recovery Procedures
+PROBLEM:
+No point-in-time recovery setup
+No automated backups
+No backup verification
+No disaster recovery plan
+
+SOLUTION:
+Enable Supabase automated backups in project settings
+Configure daily backup schedule at 2 AM UTC
+Set retention to 30 days for daily backups
+Keep weekly backups for 90 days
+Document restore procedure step by step
+Test backup restoration monthly
+Store backup documentation in separate location
+
+
+ISSUE 10.4: No Performance Monitoring
+PROBLEM:
+No slow query logging
+No index usage statistics
+No connection pool monitoring
+No query performance baseline
+
+SOLUTION:
+Enable pg_stat_statements extension
+Create performance monitoring dashboard
+Set up alerts for slow queries (> 1 second)
+Analyze query plans regularly using EXPLAIN
+Optimize based on metrics
+Create monthly performance reports
+Add query timeout limits
+
+
+ISSUE 10.5: Missing Database Constraints
+PROBLEM:
+No CHECK constraints on critical fields
+Age can be negative
+Phone numbers not validated
+Email format not enforced
+
+SOLUTION:
+Add CHECK constraint: age >= 18 AND age <= 120
+Add CHECK constraint: phone matches regex pattern
+Add CHECK constraint: aadhaar_number is 12 digits or null
+Add CHECK constraint: epic_number matches format or null
+Add CHECK constraint: verification_status in allowed values
+Add CHECK constraint: role in allowed values
+
+
+=====================================================================
+SECTION 11: IMPROVED SUPABASE SCHEMA SCRIPT
+=====================================================================
+
+NEW TABLES TO ADD:
+
+Table: verification_status_history
+Purpose: Track all verification status changes
+Columns:
+  id uuid primary key
+  profile_id uuid references profiles(id)
+  old_status text
+  new_status text
+  changed_by uuid references profiles(id)
+  changed_at timestamptz default now()
+  reason text
+  metadata jsonb
+
+Table: voting_sessions
+Purpose: Track voting attempts and violations
+Columns:
+  id uuid primary key
+  voter_id uuid references profiles(id)
+  election_id text references elections(id)
+  started_at timestamptz default now()
+  completed_at timestamptz
+  violation_count int default 0
+  blocked_at timestamptz
+  blocked_reason text
+  ip_address text
+  user_agent text
+
+Table: face_verification_attempts
+Purpose: Track all face verification attempts
+Columns:
+  id uuid primary key
+  voter_id uuid references profiles(id)
+  election_id text references elections(id)
+  attempt_time timestamptz default now()
+  success boolean
+  confidence_score decimal
+  distance decimal
+  image_quality_score decimal
+  failure_reason text
+  ip_address text
+
+Table: audit_logs
+Purpose: Comprehensive audit trail
+Columns:
+  id uuid primary key
+  action_type text
+  actor_id uuid references profiles(id)
+  target_type text
+  target_id text
+  old_values jsonb
+  new_values jsonb
+  timestamp timestamptz default now()
+  ip_address text
+  user_agent text
+
+Table: notification_queue
+Purpose: Manage email/SMS notifications
+Columns:
+  id uuid primary key
+  user_id uuid references profiles(id)
+  notification_type text
+  channel text (EMAIL, SMS, PUSH)
+  subject text
+  body text
+  sent_at timestamptz
+  failed_at timestamptz
+  failure_reason text
+  retry_count int default 0
+
+
+UPDATED TRIGGERS TO ADD:
+
+Trigger: validate_verification_

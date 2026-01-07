@@ -41,7 +41,7 @@ INSERT INTO public.profiles (
   photo_url
 )
 VALUES (
-  'PASTE_USER_ID_HERE',  -- Replace with actual user ID from Step 2
+  '12345678-abcd-1234-5678-1234567890ab',  -- Replace with actual user ID from Step 2
   'admin@securevote.com',
   'System',
   'Administrator',

@@ -1,13 +1,64 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRealtime } from '../../contexts/RealtimeContext';
-import { Shield, MapPin, CheckCircle, Fingerprint, AlertTriangle, Clock, Calendar, Award, AlertCircle, Send } from 'lucide-react';
+import { Shield, MapPin, CheckCircle, Fingerprint, AlertTriangle, Clock, Calendar, Award, AlertCircle, Send, Loader2 } from 'lucide-react';
 
 export const UserDashboard = () => {
     const { user } = useAuth();
     const { elections, candidates, votes, requestManualVerification } = useRealtime();
     const navigate = useNavigate();
+    const [isRequestingVerification, setIsRequestingVerification] = useState(false);
+
+    // TODO: Re-enable when RealtimeContext subscribeToEvents is available
+    // Subscribe to realtime verification status changes
+    /*
+    useEffect(() => {
+        if (!user?.id) return;
+
+        const unsubscribe = subscribeToEvents((event) => {
+            // Only handle events for this user
+            if (event.userId === user.id) {
+                if (event.type === 'verification:approved') {
+                    // Show success notification and celebration
+                    const notification = document.createElement('div');
+                    notification.className = 'fixed top-4 right-4 z-50 bg-green-500 text-white p-4 rounded-lg shadow-2xl animate-bounce';
+                    notification.innerHTML = `
+                        <div class="flex items-center gap-3">
+                            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                            </svg>
+                            <div>
+                                <div class="font-bold">Verification Approved!</div>
+                                <div class="text-sm">You can now vote in elections</div>
+                            </div>
+                        </div>
+                    `;
+                    document.body.appendChild(notification);
+                    setTimeout(() => notification.remove(), 5000);
+                } else if (event.type === 'verification:rejected') {
+                    const notification = document.createElement('div');
+                    notification.className = 'fixed top-4 right-4 z-50 bg-red-500 text-white p-4 rounded-lg shadow-2xl';
+                    notification.innerHTML = `
+                        <div class="flex items-center gap-3">
+                            <svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+                            </svg>
+                            <div>
+                                <div class="font-bold">Verification Rejected</div>
+                                <div class="text-sm">Please contact support</div>
+                            </div>
+                        </div>
+                    `;
+                    document.body.appendChild(notification);
+                    setTimeout(() => notification.remove(), 5000);
+                }
+            }
+        });
+
+        return () => unsubscribe();
+    }, [user?.id, subscribeToEvents]);
+    */
 
     const [confirmModal, setConfirmModal] = useState<{
         isOpen: boolean;
@@ -80,7 +131,7 @@ export const UserDashboard = () => {
             icon: <Fingerprint className="text-yellow-500" size={28} />,
             confirmText: 'Start KYC',
             confirmColor: 'bg-yellow-500 hover:bg-yellow-600',
-            onConfirm: () => navigate('/IdVerification')
+            onConfirm: () => navigate('/BiometricVerification')
         });
     };
 
@@ -231,7 +282,7 @@ export const UserDashboard = () => {
                                         </div>
                                         <div className="w-20 h-20 bg-white p-1 rounded-lg">
                                             <img
-                                                src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${user?.id}`}
+                                                src={`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(`SecureVote Digital Voter ID\n━━━━━━━━━━━━━━━━━━━━━━━━\nName: ${user?.firstName} ${user?.lastName}\nDOB: ${user?.dob}\nID: ${user?.idNumber}\nLocation: ${user?.address?.city}, ${user?.address?.state}\nStatus: ${isVerified ? 'VERIFIED' : 'PENDING VERIFICATION'}\n━━━━━━━━━━━━━━━━━━━━━━━━\nIssued by Election Commission`)}`}
                                                 alt="QR"
                                                 className="w-full h-full"
                                             />
@@ -286,11 +337,31 @@ export const UserDashboard = () => {
                                             </div>
                                         </div>
                                         <button
-                                            onClick={() => user?.id && requestManualVerification(user.id)}
-                                            className="w-full px-4 py-3 bg-gradient-to-r from-primary-600 to-secondary-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:from-primary-700 hover:to-secondary-700 transition shadow-lg shadow-primary-500/20"
+                                            onClick={async () => {
+                                                if (!user?.id) return;
+                                                setIsRequestingVerification(true);
+                                                try {
+                                                    await requestManualVerification(user.id);
+                                                } catch (error) {
+                                                    console.error('Manual verification request failed:', error);
+                                                } finally {
+                                                    setIsRequestingVerification(false);
+                                                }
+                                            }}
+                                            disabled={isRequestingVerification}
+                                            className="w-full px-4 py-3 bg-gradient-to-r from-primary-600 to-secondary-600 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:from-primary-700 hover:to-secondary-700 transition shadow-lg shadow-primary-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
                                         >
-                                            <Send size={18} />
-                                            Request Manual Verification
+                                            {isRequestingVerification ? (
+                                                <>
+                                                    <Loader2 size={18} className="animate-spin" />
+                                                    Sending Request...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Send size={18} />
+                                                    Request Manual Verification
+                                                </>
+                                            )}
                                         </button>
                                         <p className="text-xs text-gray-500 text-center">Takes time - Admin will cross-verify your Aadhaar/EPIC against government records</p>
                                     </div>

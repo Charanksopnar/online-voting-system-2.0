@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { INDIAN_STATES_DISTRICTS } from '../../data/indianStatesDistricts';
 import { useRealtime } from '../../contexts/RealtimeContext';
 import { useNotification } from '../../contexts/NotificationContext';
@@ -25,7 +25,8 @@ export const VoterListsVerification = () => {
 
     // New row form state
     const [newRow, setNewRow] = useState<Partial<OfficialVoter>>({
-        fullName: '',
+        firstName: '',
+        lastName: '',
         aadhaarNumber: '',
         epicNumber: '',
         fatherName: '',
@@ -46,7 +47,7 @@ export const VoterListsVerification = () => {
     const filtered = useMemo(() => {
         return officialVoters.filter(v => {
             const matchesSearch =
-                v.fullName?.toLowerCase().includes(search.toLowerCase()) ||
+                v.firstName?.toLowerCase().includes(search.toLowerCase()) ||
                 v.aadhaarNumber?.includes(search) ||
                 v.epicNumber?.includes(search);
             const matchesState = filterState ? v.state === filterState : true;
@@ -54,6 +55,19 @@ export const VoterListsVerification = () => {
             return matchesSearch && matchesState && matchesDistrict;
         });
     }, [officialVoters, search, filterState, filterDistrict]);
+
+    // Debug: Log data on mount and when it changes
+    useEffect(() => {
+        console.log('🔍 VoterListsVerification - Data Check:');
+        console.log('  Total officialVoters:', officialVoters.length);
+        console.log('  Filtered voters:', filtered.length);
+        console.log('  Search term:', search);
+        console.log('  Filter state:', filterState);
+        console.log('  Filter district:', filterDistrict);
+        if (officialVoters.length > 0) {
+            console.log('  Sample voter data:', officialVoters[0]);
+        }
+    }, [officialVoters, filtered, search, filterState, filterDistrict]);
 
     // Robust Data Parser
     const processData = (rawData: any[]): OfficialVoter[] => {
@@ -90,28 +104,131 @@ export const VoterListsVerification = () => {
                 });
             };
 
+            // Normalize DOB format (accept DD-MM-YYYY or YYYY-MM-DD, convert to YYYY-MM-DD)
+            // Also handle Excel serial date numbers
+            const normalizeDOB = (dob: any): string => {
+                if (!dob) return '';
+
+                // Handle Excel serial date numbers (e.g., 38237, 34762)
+                if (typeof dob === 'number' || (!isNaN(Number(dob)) && Number(dob) > 1000)) {
+                    const excelEpoch = new Date(1899, 11, 30);
+                    const days = Number(dob);
+                    const date = new Date(excelEpoch.getTime() + days * 24 * 60 * 60 * 1000);
+
+                    if (!isNaN(date.getTime())) {
+                        const year = date.getFullYear();
+                        const month = String(date.getMonth() + 1).padStart(2, '0');
+                        const day = String(date.getDate()).padStart(2, '0');
+                        return `${year}-${month}-${day}`;
+                    }
+                }
+
+                const dobStr = String(dob).trim();
+
+                // Check if format is DD-MM-YYYY (e.g., 15-05-1988)
+                const ddmmyyyyMatch = dobStr.match(/^(\d{2})[\/\-](\d{2})[\/\-](\d{4})$/);
+                if (ddmmyyyyMatch) {
+                    const [, day, month, year] = ddmmyyyyMatch;
+                    return `${year}-${month}-${day}`; // Convert to YYYY-MM-DD
+                }
+
+                // Check if format is YYYY-MM-DD (e.g., 1988-05-15)
+                const yyyymmddMatch = dobStr.match(/^(\d{4})[\/\-](\d{2})[\/\-](\d{2})$/);
+                if (yyyymmddMatch) {
+                    return dobStr; // Already in correct format
+                }
+
+                // Return as-is if no pattern matches (will be logged)
+                console.warn('⚠️ Unrecognized DOB format:', dobStr);
+                return dobStr;
+            };
+
             // Map to OfficialVoter schema with expanded fuzzy matching
+            const firstName = normalized['first name'] || normalized['name'] || normalized['full name'] || normalized['voter name'] || normalized['candidate name'] || normalized['fullname'] || normalized['student name'] || '';
+            const lastName = normalized['last name'] || normalized['surname'] || normalized['family name'] || '';
+
             const voter: OfficialVoter = {
                 id: uuid(),
-                fullName: normalized['name'] || normalized['full name'] || normalized['voter name'] || normalized['candidate name'] || normalized['fullname'] || normalized['student name'] || '',
-                fatherName: normalized['father'] || normalized['father name'] || normalized['relation name'] || normalized['guardian'] || normalized['fathername'] || normalized['parent'] || '',
-                aadhaarNumber: String(normalized['aadhaar'] || normalized['aadhar'] || normalized['uid'] || normalized['aadhaar no'] || normalized['aadhaar number'] || normalized['adhaarnumber'] || normalized['uid no'] || ''),
-                epicNumber: String(normalized['epic'] || normalized['epic no'] || normalized['voter id'] || normalized['voter number'] || normalized['voterid'] || normalized['id card'] || normalized['epicnumber'] || normalized['epic number'] || normalized['voter id no'] || ''),
-                age: parseInt(normalized['age']) || undefined,
+                // Map first 'first name' column to firstName
+                firstName: firstName,
+                // Map second name column (might be labeled as 'first name' again or 'last name')
+                lastName: lastName,
+                // Compute fullName from firstName and lastName
+                fullName: firstName && lastName ? `${firstName} ${lastName}`.trim() : firstName || '',
+                // Map 'father name' variations
+                fatherName: normalized['father name'] || normalized['father'] || normalized['fathers name'] || normalized['relation name'] || normalized['guardian'] || normalized['fathername'] || normalized['parent'] || '',
+                // Map 'aadhar number' or 'aadhaar' variations
+                aadhaarNumber: normalized['aadhar number'] || normalized['aadhaar number'] || normalized['aadhaar'] || normalized['aadhar'] || normalized['uid'] || normalized['aadhaar no'] || normalized['adhaarnumber'] || normalized['uid no'] || '',
+                // Map 'voter number' or 'epic' variations - ensure we capture 'epic' column
+                epicNumber: normalized['epic'] || normalized['voter number'] || normalized['voter number(e'] || normalized['epic no'] || normalized['epic number'] || normalized['voter id'] || normalized['voterid'] || normalized['id card'] || normalized['epicnumber'] || normalized['voter id no'] || normalized['elector photo identity card'] || '',
+                // Map 'dob(dob)' or 'dob' variations
+                dob: normalizeDOB(normalized['dob(dob)'] || normalized['dob'] || normalized['date of birth'] || normalized['birth date'] || normalized['birthdate'] || ''),
+                // Calculate age from DOB if available, otherwise use provided age
+                age: (() => {
+                    const dobValue = normalizeDOB(normalized['dob(dob)'] || normalized['dob'] || normalized['date of birth'] || normalized['birth date'] || normalized['birthdate'] || '');
+                    if (dobValue) {
+                        const birthDate = new Date(dobValue);
+                        const today = new Date();
+                        let calculatedAge = today.getFullYear() - birthDate.getFullYear();
+                        const monthDiff = today.getMonth() - birthDate.getMonth();
+                        if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+                            calculatedAge--;
+                        }
+                        return calculatedAge > 0 ? calculatedAge : undefined;
+                    }
+                    return parseInt(normalized['age']) || undefined;
+                })(),
                 gender: normalized['gender'] || normalized['sex'] || '',
+                // Map 'state' (uppercase or lowercase)
                 state: normalized['state'] || normalized['address state'] || '',
+                // Map 'district' (uppercase or lowercase)
                 district: normalized['district'] || normalized['address district'] || '',
+                // Map 'city' (uppercase or lowercase)
                 city: normalized['city'] || normalized['town'] || normalized['village'] || normalized['address city'] || '',
-                pollingBooth: normalized['booth'] || normalized['polling booth'] || normalized['station'] || normalized['pollingbooth'] || '',
-                dob: normalized['dob'] || normalized['date of birth'] || normalized['birth date'] || normalized['birthdate'] || '',
+                pollingBooth: normalized['booth'] || normalized['polling booth'] || normalized['station'] || normalized['pollingbooth'] || normalized['polling station'] || '',
                 fullAddress: normalized['address'] || normalized['full address'] || normalized['residence'] || normalized['location'] || '',
                 createdAt: new Date().toISOString()
             };
 
+
+            // Log first row for debugging
+            if (rawData.indexOf(row) === 0) {
+                console.log('📋 First row normalized keys:', Object.keys(normalized));
+                console.log('📋 First row mapped voter:', {
+                    firstName: voter.firstName,
+                    lastName: voter.lastName,
+                    fullName: voter.fullName,
+                    aadhaarNumber: voter.aadhaarNumber,
+                    epicNumber: voter.epicNumber,
+                    fatherName: voter.fatherName,
+                    state: voter.state,
+                    district: voter.district,
+                    city: voter.city
+                });
+                console.log('🔍 EPIC field debugging:', {
+                    'normalized.epic': normalized['epic'],
+                    'normalized.voter number': normalized['voter number'],
+                    'normalized.epic no': normalized['epic no'],
+                    'final epicNumber': voter.epicNumber
+                });
+                console.log('🔍 DOB field debugging:', {
+                    'raw dob value': normalized['dob'],
+                    'raw dob type': typeof normalized['dob'],
+                    'normalized dob': voter.dob
+                });
+                console.log('🔍 All normalized fields:', normalized);
+            }
+
             // STRICT FILTER: Must have at least a Name AND (Aadhaar OR EPIC)
             // Loose filter previously allowed just one, but strict verification needs strong ID
-            if (!voter.fullName) return null;
-            if (!voter.aadhaarNumber && !voter.epicNumber) return null;
+            if (!voter.firstName) {
+                console.log('⚠️ Skipping row - no name found. Row data:', Object.keys(normalized).slice(0, 5));
+                return null;
+            }
+            if (!voter.aadhaarNumber && !voter.epicNumber) {
+                console.log('⚠️ Skipping row - no Aadhaar or EPIC found. Row data:', Object.keys(normalized).slice(0, 5));
+                return null;
+            }
 
             return voter;
         }).filter(Boolean) as OfficialVoter[];
@@ -147,19 +264,29 @@ export const VoterListsVerification = () => {
                     },
                     complete: async (results) => {
                         try {
-                            console.log('Papa Parse Results:', results);
+                            console.log('📊 CSV Parse Complete');
+                            console.log('Total rows parsed:', results.data.length);
+                            console.log('Parse errors:', results.errors.length);
+
                             if (results.errors && results.errors.length > 0) {
-                                console.warn('CSV Parse Errors:', results.errors);
+                                console.warn('⚠️ CSV Parse Errors:', results.errors);
                             }
 
+                            console.log('🔍 Sample raw data (first 2 rows):', results.data.slice(0, 2));
+
                             const parsedData = processData(results.data);
-                            console.log('Processed Data:', parsedData);
+                            console.log('✅ Processed Data Count:', parsedData.length);
+                            console.log(' Sample processed data:', parsedData.slice(0, 2));
+                            console.log(' Sending to database...');
 
                             if (parsedData.length > 0) {
                                 await addOfficialVoters(parsedData);
                                 addNotification('SUCCESS', 'Import Successful', `Imported ${parsedData.length} voters from CSV.`);
+                                console.log('✅ Database insert completed');
                             } else {
-                                addNotification('ERROR', 'Import Failed', 'No valid voter data found in CSV. Please checks column headers.');
+                                console.error('No valid data extracted from CSV');
+                                console.log('Tip: Check if column headers match expected patterns (name, aadhaar, epic, etc.)');
+                                addNotification('ERROR', 'Import Failed', 'No valid voter data found in CSV. Please check column headers match: Name, Aadhaar, EPIC, etc.');
                             }
                         } catch (innerError: any) {
                             console.error('Error processing CSV data:', innerError);
@@ -180,13 +307,16 @@ export const VoterListsVerification = () => {
                 const reader = new FileReader();
                 reader.onload = async (evt) => {
                     try {
+                        console.log('📊 Excel Processing Started');
                         const bstr = evt.target?.result;
                         const wb = XLSX.read(bstr, { type: 'binary' });
                         const wsname = wb.SheetNames[0];
                         const ws = wb.Sheets[wsname];
+                        console.log('📄 Reading sheet:', wsname);
 
                         // Smart header detection: Read as array of arrays first
                         const rawMatrix = XLSX.utils.sheet_to_json(ws, { header: 1 }) as any[][];
+                        console.log('Total rows in Excel:', rawMatrix.length);
 
                         let headerRowIndex = 0;
                         let foundHeader = false;
@@ -200,31 +330,37 @@ export const VoterListsVerification = () => {
                             if (rowStr.includes('name') || rowStr.includes('epic') || rowStr.includes('aadhaar')) {
                                 headerRowIndex = i;
                                 foundHeader = true;
+                                console.log(`🎯 Header row detected at index ${i}:`, row);
                                 break;
                             }
                         }
 
-                        console.log(`Smart Excel Parser: Header found at index ${headerRowIndex}`);
+                        if (!foundHeader) {
+                            console.warn('⚠️ No header row detected, using first row');
+                        }
 
                         // Re-parse with the correct range
-                        // We can use the 'range' option in sheet_to_json, but modifying the range of the worksheet object is deeper.
-                        // Simpler: use the rawMatrix and map it ourselves or slice it.
-
-                        // Option A: Use sheet_to_json with range (safe)
                         const range = XLSX.utils.decode_range(ws['!ref'] || 'A1');
                         range.s.r = headerRowIndex; // Move start row to detected header
                         const newRange = XLSX.utils.encode_range(range);
                         const data = XLSX.utils.sheet_to_json(ws, { range: newRange });
 
-                        console.log('Excel Raw Data:', data);
+                        console.log('🔍 Sample raw Excel data (first 2 rows):', data.slice(0, 2));
+                        console.log('Total data rows:', data.length);
 
                         const parsedData = processData(data);
+                        console.log('✅ Processed Data Count:', parsedData.length);
+                        console.log('Sample processed data:', parsedData.slice(0, 2));
+                        console.log('Sending to database...');
 
                         if (parsedData.length > 0) {
                             await addOfficialVoters(parsedData);
                             addNotification('SUCCESS', 'Import Successful', `Imported ${parsedData.length} voters from Excel.`);
+                            console.log('✅ Database insert completed');
                         } else {
-                            addNotification('ERROR', 'Import Failed', 'No valid data found in Excel. Check column headers.');
+                            console.error('No valid data extracted from Excel');
+                            console.log('💡 Tip: Check if column headers match expected patterns (name, aadhaar, epic, etc.)');
+                            addNotification('ERROR', 'Import Failed', 'No valid data found in Excel. Check column headers match: Name, Aadhaar, EPIC, etc.');
                         }
                     } catch (e: any) {
                         console.error('Excel processing error:', e);
@@ -256,20 +392,84 @@ export const VoterListsVerification = () => {
 
     // Export to CSV
     const handleExport = () => {
-        const headers = ['Full Name', 'Aadhaar Number', 'EPIC Number', 'Father Name', 'Age', 'Gender', 'State', 'District', 'City', 'Polling Booth'];
-        const rows = filtered.map(v => [
-            v.fullName, v.aadhaarNumber, v.epicNumber, v.fatherName,
-            v.age?.toString() || '', v.gender, v.state, v.district, v.city, v.pollingBooth
-        ].map(c => `"${c || ''}"`).join(','));
+        console.log('🔽 Export CSV initiated');
+        console.log('  Total official voters in state:', officialVoters.length);
+        console.log('  Filtered voters to export:', filtered.length);
+        console.log('  Active filters:', { search, filterState, filterDistrict });
 
-        const csv = [headers.join(','), ...rows].join('\n');
-        const blob = new Blob([csv], { type: 'text/csv' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `official_voter_list_${new Date().toISOString().split('T')[0]}.csv`;
-        a.click();
-        URL.revokeObjectURL(url);
+        // Check if there's any data at all
+        if (officialVoters.length === 0) {
+            console.warn('⚠️ No official voter data loaded from database');
+            addNotification('WARNING', 'No Data Available',
+                'No voter records found in the database. Please upload a CSV/Excel file first using the "Upload CSV/Excel" button above.');
+            return;
+        }
+
+        // Check if filters are hiding all data
+        if (filtered.length === 0) {
+            console.warn('⚠️ All data filtered out');
+            addNotification('WARNING', 'No Matching Records',
+                `You have ${officialVoters.length} total records, but your current filters (search: "${search}", state: "${filterState}", district: "${filterDistrict}") are hiding all of them. Clear your filters or export all data instead.`);
+
+            // Offer to export all data anyway
+            if (confirm(`No records match your current filters, but you have ${officialVoters.length} total records. Would you like to export ALL records instead?`)) {
+                exportData(officialVoters);
+            }
+            return;
+        }
+
+        exportData(filtered);
+    };
+
+    // Actual export logic extracted to a separate function
+    const exportData = (dataToExport: OfficialVoter[]) => {
+        console.log('📊 Exporting', dataToExport.length, 'records...');
+        console.log('  Sample data being exported (first 2 rows):', dataToExport.slice(0, 2));
+
+        try {
+            const headers = ['First Name', 'Last Name', 'Full Name', 'Father Name', 'Aadhaar Number', 'EPIC Number', 'DOB', 'Age', 'Gender', 'State', 'District', 'City', 'Full Address', 'Polling Booth'];
+            const rows = dataToExport.map(v => [
+                v.firstName || '',
+                v.lastName || '',
+                v.fullName || '',
+                v.fatherName || '',
+                v.aadhaarNumber || '',
+                v.epicNumber || '',
+                v.dob || '',
+                v.age?.toString() || '',
+                v.gender || '',
+                v.state || '',
+                v.district || '',
+                v.city || '',
+                v.fullAddress || '',
+                v.pollingBooth || ''
+            ].map(c => `"${String(c).replace(/"/g, '""')}"`).join(','));
+
+            const csv = [headers.join(','), ...rows].join('\n');
+            console.log('  CSV size:', csv.length, 'characters');
+            console.log('  CSV preview (first 300 chars):', csv.substring(0, 300));
+
+            // Create and download the file
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `official_voter_list_${new Date().toISOString().split('T')[0]}.csv`;
+            document.body.appendChild(a);
+            a.click();
+
+            // Cleanup
+            setTimeout(() => {
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }, 100);
+
+            console.log('✅ CSV download triggered successfully');
+            addNotification('SUCCESS', 'Export Complete', `Successfully exported ${dataToExport.length} voter records to CSV.`);
+        } catch (error: any) {
+            console.error('❌ Export error:', error);
+            addNotification('ERROR', 'Export Failed', `Failed to export CSV: ${error.message}`);
+        }
     };
 
     // Add new row

@@ -1,0 +1,6 @@
+Name,Aadhaar,EPIC,Father,Age,Gender,State,District,City,Booth,DOB,Address
+Rajesh Kumar,012345678901,ABC1234567,Ram Kumar,28,Male,Maharashtra,Mumbai,Mumbai,Booth 1,1995-06-15,123 Main Street Mumbai
+Priya Sharma,098765432109,XYZ9876543,Vijay Sharma,32,Female,Maharashtra,Mumbai,Mumbai,Booth 2,1991-03-20,456 Park Avenue Mumbai
+Amit Patel,123456789012,DEF1234567,Suresh Patel,25,Male,Gujarat,Ahmedabad,Ahmedabad,Booth 3,1998-11-10,789 Gandhi Road Ahmedabad
+Sneha Reddy,234567890123,GHI2345678,Krishna Reddy,29,Female,Telangana,Hyderabad,Hyderabad,Booth 4,1994-08-05,321 Tech Park Hyderabad
+Vikram Singh,345678901234,JKL3456789,Ranjit Singh,35,Male,Punjab,Ludhiana,Ludhiana,Booth 5,1988-12-25,654 Golden Temple Road Ludhiana

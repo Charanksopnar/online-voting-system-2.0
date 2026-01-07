@@ -29,6 +29,31 @@ export default defineConfig(({ mode }) => {
       alias: {
         '@': path.resolve(__dirname, '.'),
       }
+    },
+    build: {
+      // Optimize chunk splitting for better caching
+      rollupOptions: {
+        output: {
+          manualChunks: {
+            'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+            'supabase': ['@supabase/supabase-js'],
+            'charts': ['recharts'],
+          }
+        }
+      },
+      // Enable compression
+      minify: 'terser',
+      terserOptions: {
+        compress: {
+          drop_console: mode === 'production',
+        }
+      },
+      // Increase chunk size warning limit
+      chunkSizeWarningLimit: 1000,
+    },
+    // Enable dependency pre-bundling optimization
+    optimizeDeps: {
+      include: ['react', 'react-dom', 'react-router-dom', '@supabase/supabase-js'],
     }
   };
 });

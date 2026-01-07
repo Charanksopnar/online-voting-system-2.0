@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotification } from '../../contexts/NotificationContext';
 import { useNavigate } from 'react-router-dom';
@@ -198,7 +198,7 @@ export const EditProfile = () => {
     };
 
     return (
-        <div className="min-h-screen bg-gray-50 pt-8 pb-12 px-4 sm:px-6 lg:px-8">
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 pt-8 pb-12 px-4 sm:px-6 lg:px-8 transition-colors duration-200">
             {loading && <LoadingOverlay message={loadingMessage} />}
             {showCamera && (
                 <LivenessCamera
@@ -246,11 +246,11 @@ export const EditProfile = () => {
             )}
 
             <div className="max-w-3xl mx-auto">
-                <button onClick={() => navigate('/User')} className="flex items-center text-gray-500 hover:text-gray-700 mb-6">
+                <button onClick={() => navigate('/User')} className="flex items-center text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 mb-6 transition-colors">
                     <ArrowLeft size={16} className="mr-1" /> Back to Dashboard
                 </button>
 
-                <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+                <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 overflow-hidden">
                     <div className="bg-primary-600 px-6 py-4 flex justify-between items-center">
                         <h1 className="text-xl font-bold text-white flex items-center gap-2">
                             <User size={20} /> Edit Profile
@@ -260,9 +260,9 @@ export const EditProfile = () => {
                     <form onSubmit={handleSaveClick} className="p-8 space-y-6">
 
                         {/* Face Update Section */}
-                        <div className="flex flex-col items-center mb-8 p-6 bg-blue-50/50 rounded-xl border border-blue-100">
+                        <div className="flex flex-col items-center mb-8 p-6 bg-blue-50/50 dark:bg-blue-900/20 rounded-xl border border-blue-100 dark:border-blue-800">
                             <div className="relative group cursor-pointer" onClick={() => setShowCamera(true)}>
-                                <div className="w-32 h-32 bg-gray-200 rounded-full mb-3 flex items-center justify-center overflow-hidden border-4 border-white shadow-md">
+                                <div className="w-32 h-32 bg-gray-200 dark:bg-gray-700 rounded-full mb-3 flex items-center justify-center overflow-hidden border-4 border-white shadow-md">
                                     {formData.photoUrl ? (
                                         <img src={formData.photoUrl} alt="Profile" className="w-full h-full object-cover" />
                                     ) : (
@@ -277,18 +277,18 @@ export const EditProfile = () => {
                             <button
                                 type="button"
                                 onClick={() => setShowCamera(true)}
-                                className="text-sm font-bold text-primary-600 hover:text-primary-700 flex items-center gap-2 bg-white px-4 py-2 rounded-full shadow-sm border border-gray-200"
+                                className="text-sm font-bold text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 flex items-center gap-2 bg-white dark:bg-gray-700 px-4 py-2 rounded-full shadow-sm border border-gray-200 dark:border-gray-600"
                             >
                                 <Camera size={16} />
                                 {user?.faceEmbeddings ? 'Update Face Photo' : 'Setup Face Biometrics'}
                             </button>
                             {!user?.faceEmbeddings && (
-                                <p className="text-xs text-red-500 mt-2 font-medium flex items-center gap-1">
+                                <p className="text-xs text-red-500 dark:text-red-400 mt-2 font-medium flex items-center gap-1">
                                     <AlertTriangle size={12} /> Action Required: Face data missing for voting
                                 </p>
                             )}
                             {newFaceBase64 && (
-                                <p className="text-xs text-green-600 mt-2 font-bold flex items-center gap-1">
+                                <p className="text-xs text-green-600 dark:text-green-400 mt-2 font-bold flex items-center gap-1">
                                     <CheckCircle size={12} /> New biometric data ready to save
                                 </p>
                             )}
@@ -296,20 +296,20 @@ export const EditProfile = () => {
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="space-y-1">
-                                <label className="text-sm font-medium text-gray-700">First Name</label>
-                                <input name="firstName" value={formData.firstName} onChange={handleChange} className="w-full p-2 border rounded-md focus:ring-primary-500 focus:border-primary-500" />
+                                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">First Name</label>
+                                <input name="firstName" value={formData.firstName} onChange={handleChange} className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-primary-500 focus:border-primary-500 dark:bg-gray-700 dark:text-white" />
                             </div>
                             <div className="space-y-1">
-                                <label className="text-sm font-medium text-gray-700">Last Name</label>
-                                <input name="lastName" value={formData.lastName} onChange={handleChange} className="w-full p-2 border rounded-md focus:ring-primary-500 focus:border-primary-500" />
+                                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">Last Name</label>
+                                <input name="lastName" value={formData.lastName} onChange={handleChange} className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-primary-500 focus:border-primary-500 dark:bg-gray-700 dark:text-white" />
                             </div>
                             <div className="space-y-1">
                                 <label className="text-sm font-medium text-gray-700 flex items-center gap-1"><Mail size={14} /> Email (Read Only)</label>
-                                <input name="email" value={formData.email} disabled className="w-full p-2 border rounded-md bg-gray-50 text-gray-500 cursor-not-allowed" />
+                                <input name="email" value={formData.email} disabled className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 cursor-not-allowed" />
                             </div>
                             <div className="space-y-1">
                                 <label className="text-sm font-medium text-gray-700 flex items-center gap-1"><Phone size={14} /> Phone Number</label>
-                                <input name="phone" value={formData.phone} onChange={handleChange} className="w-full p-2 border rounded-md focus:ring-primary-500 focus:border-primary-500" placeholder="+91..." />
+                                <input name="phone" value={formData.phone} onChange={handleChange} className="w-full p-2 border border-gray-300 dark:border-gray-600 rounded-md focus:ring-primary-500 focus:border-primary-500 dark:bg-gray-700 dark:text-white" placeholder="+91..." />
                             </div>
                         </div>
 
@@ -324,3 +324,4 @@ export const EditProfile = () => {
         </div>
     );
 };
+

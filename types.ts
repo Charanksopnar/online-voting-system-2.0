@@ -39,6 +39,7 @@ export interface User {
   aadhaarNumber?: string;
   epicNumber?: string;
   epicDocUrl?: string;
+  latestVerificationPhoto?: string; // Most recent biometric verification photo for admin review
   role: UserRole;
   verificationStatus: VerificationStatus;
   isBlocked: boolean;
@@ -56,6 +57,8 @@ export interface OfficialVoter {
   aadhaarNumber?: string;
   epicNumber?: string;
   fullName: string;
+  firstName: string;
+  lastName?: string;
   fatherName?: string;
   age?: number;
   gender?: string;

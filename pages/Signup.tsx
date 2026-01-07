@@ -8,6 +8,7 @@ import { Upload, Camera, Check, RefreshCw, User, MapPin, ShieldCheck, FileText, 
 import { supabase } from '../supabase';
 import { INDIAN_STATES_DISTRICTS } from '../data/indianStatesDistricts';
 import { getEmbeddingForBase64Image, verifyIdentityAgainstDoc } from '../services/faceService';
+import { optimizeImage } from '../utils/imageOptimizer';
 
 function Input({ label, fullWidth = false, className = '', ...props }: any) {
     return (
@@ -23,6 +24,8 @@ export const Signup = () => {
     const { addNotification } = useNotification();
     const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
+    // Safety timeout ref
+    const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const [loadingMessage, setLoadingMessage] = useState('Creating Secure Profile...');
 
     const [showAadhaarPopup, setShowAadhaarPopup] = useState(true);
@@ -42,6 +45,7 @@ export const Signup = () => {
     const [formData, setFormData] = useState({
         firstName: '',
         lastName: '',
+        fatherName: '',
         email: '',
         phone: '',
         dob: '',
@@ -160,7 +164,8 @@ export const Signup = () => {
         }
     };
 
-    const captureFace = () => {
+
+    const captureFace = async () => {
         if (videoRef.current) {
             const canvas = document.createElement('canvas');
             canvas.width = videoRef.current.videoWidth;
@@ -172,6 +177,29 @@ export const Signup = () => {
                 // Store base64 for DeepFace embedding extraction
                 const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
                 const base64 = dataUrl.split(',')[1];
+
+                // SECURITY: Validate face count before accepting capture
+                try {
+                    setLoadingMessage('Validating face...');
+                    setLoading(true);
+
+                    const { detectAndCountFaces } = await import('../services/faceService');
+                    const faceCheck = await detectAndCountFaces(base64);
+
+                    if (faceCheck.faceCount !== 1) {
+                        addNotification('ERROR', 'Face Detection Failed', faceCheck.message);
+                        setLoading(false);
+                        return; // Don't capture if validation fails
+                    }
+
+                    setLoading(false);
+                    addNotification('SUCCESS', 'Face Validated', 'Single face detected successfully.');
+                } catch (err: any) {
+                    setLoading(false);
+                    addNotification('ERROR', 'Validation Error', err.message || 'Could not validate face.');
+                    return;
+                }
+
                 setFaceBase64(base64);
 
                 canvas.toBlob((blob) => {
@@ -186,6 +214,7 @@ export const Signup = () => {
             }
         }
     };
+
 
     const resetCamera = () => {
         setFaceImageBlob(null);
@@ -268,130 +297,285 @@ export const Signup = () => {
         }
 
         try {
+            setLoadingMessage('Validating Identity Documents...');
+            setLoading(true);
+
+            // 2. Check for Duplicate Aadhaar Number
+            if (formData.aadhaarNumber && formData.aadhaarNumber.trim()) {
+                const { data: existingAadhaar, error: aadhaarError } = await supabase
+                    .from('profiles')
+                    .select('id, first_name, last_name')
+                    .eq('aadhaar_number', formData.aadhaarNumber.trim())
+                    .limit(1);
+
+                if (aadhaarError) {
+                    console.error('Error checking Aadhaar:', aadhaarError);
+                } else if (existingAadhaar && existingAadhaar.length > 0) {
+                    setLoading(false);
+                    addNotification('ERROR', 'Duplicate Aadhaar Number',
+                        `This Aadhaar number is already registered. Each Aadhaar can only be used once.`);
+                    return;
+                }
+            }
+
+            // 3. Check for Duplicate EPIC Number
+            if (formData.epicNumber && formData.epicNumber.trim()) {
+                const { data: existingEpic, error: epicError } = await supabase
+                    .from('profiles')
+                    .select('id, first_name, last_name')
+                    .eq('epic_number', formData.epicNumber.trim())
+                    .limit(1);
+
+                if (epicError) {
+                    console.error('Error checking EPIC:', epicError);
+                } else if (existingEpic && existingEpic.length > 0) {
+                    setLoading(false);
+                    addNotification('ERROR', 'Duplicate Voter ID',
+                        `This Voter ID (EPIC) number is already registered. Each Voter ID can only be used once.`);
+                    return;
+                }
+            }
+
             setLoadingMessage('Creating Secure Profile...');
             setLoading(true);
 
+            // Global safety timeout: If nothing happens in 60 seconds, kill it
+            loadingTimeoutRef.current = setTimeout(() => {
+                setLoading(false);
+                addNotification('ERROR', 'Timeout', 'The request took too long. Please check your network or try again.');
+            }, 60000);
+
+            console.time('RegistrationTotal');
+
             const tempId = Date.now().toString();
 
-            // PARALLEL EXECUTION: Start all uploads and AI processing simultaneously
-            const faceEmbeddingPromise = getEmbeddingForBase64Image(faceBase64)
-                .then(data => {
-                    if (!data || data.length === 0) throw new Error('Face embedding extraction returned empty data.');
-                    return data;
-                });
+            // 1. Optimize Images First (this is the main speed improvement)
+            console.time('ImageOptimization');
 
-            const aadhaarUploadPromise = aadhaarFile ? (async () => {
-                const idExt = aadhaarFile.name.split('.').pop();
-                const sanitizedIdName = sanitizeFilename(aadhaarFile.name.split('.')[0]);
-                return await uploadToStorage(aadhaarFile, 'uploads', `${tempId}_aadhaar_${sanitizedIdName}.${idExt}`);
-            })() : Promise.resolve('');
+            let optimizedFace: { blob: Blob, base64: string } | null = null;
+            let optimizedAadhaar: { blob: Blob, base64: string } | null = null;
+            let optimizedEpic: { blob: Blob, base64: string } | null = null;
 
-            const epicUploadPromise = epicFile ? (async () => {
-                const idExt = epicFile.name.split('.').pop();
-                const sanitizedIdName = sanitizeFilename(epicFile.name.split('.')[0]);
-                return await uploadToStorage(epicFile, 'uploads', `${tempId}_epic_${sanitizedIdName}.${idExt}`);
-            })() : Promise.resolve('');
+            if (faceImageBlob) {
+                optimizedFace = await optimizeImage(faceImageBlob, 1024, 0.8);
+            }
 
-            const faceUploadPromise = (async () => {
-                const facePath = `${tempId}_face.jpg`;
-                return await uploadToStorage(faceImageBlob, 'faces', facePath);
-            })();
+            if (aadhaarFile) {
+                if (aadhaarFile.type === 'application/pdf') {
+                    const b64 = await fileToBase64(aadhaarFile);
+                    optimizedAadhaar = { blob: aadhaarFile, base64: b64.split(',')[1] };
+                } else {
+                    optimizedAadhaar = await optimizeImage(aadhaarFile, 1024, 0.8);
+                }
+            }
 
-            // Wait for all critical operations
-            addNotification('INFO', 'Processing', 'Uploading documents and processing biometrics...');
+            if (epicFile) {
+                if (epicFile.type === 'application/pdf') {
+                    const b64 = await fileToBase64(epicFile);
+                    optimizedEpic = { blob: epicFile, base64: b64.split(',')[1] };
+                } else {
+                    optimizedEpic = await optimizeImage(epicFile, 1024, 0.8);
+                }
+            }
 
-            const [faceEmbeddings, kycUrl, epicUrl, faceUrl] = await Promise.all([
-                faceEmbeddingPromise,
-                aadhaarUploadPromise,
-                epicUploadPromise,
-                faceUploadPromise
-            ]);
+            console.timeEnd('ImageOptimization');
 
-            addNotification('SUCCESS', 'Biometric Success', `Face data extracted successfully (${faceEmbeddings.length} dimensions).`);
+            if (!optimizedFace) throw new Error('Face image processing failed.');
 
-            // 3. Create User Account
+            // 2. Upload Files (using optimized versions)
+            console.time('Uploads');
+
+            const facePath = `${tempId}_face.jpg`;
+            const faceUrl = await uploadToStorage(optimizedFace.blob, 'faces', facePath);
+
+            let kycUrl = '';
+            if (optimizedAadhaar && aadhaarFile) {
+                const ext = aadhaarFile.type === 'application/pdf' ? 'pdf' : 'jpg';
+                const name = sanitizeFilename(aadhaarFile.name.split('.')[0]);
+                kycUrl = await uploadToStorage(optimizedAadhaar.blob, 'uploads', `${tempId}_aadhaar_${name}.${ext}`);
+            }
+
+            let epicUrl = '';
+            if (optimizedEpic && epicFile) {
+                const ext = epicFile.type === 'application/pdf' ? 'pdf' : 'jpg';
+                const name = sanitizeFilename(epicFile.name.split('.')[0]);
+                epicUrl = await uploadToStorage(optimizedEpic.blob, 'uploads', `${tempId}_epic_${name}.${ext}`);
+            }
+
+            console.timeEnd('Uploads');
+
+            // 3. Get Face Embedding
+            console.time('FaceEmbedding');
+            const faceEmbeddings = await getEmbeddingForBase64Image(optimizedFace.base64);
+            console.timeEnd('FaceEmbedding');
+
+            // SECURITY: Strict validation of face embeddings
+            if (!faceEmbeddings || faceEmbeddings.length === 0) {
+                throw new Error('Face embedding extraction failed. Please retake photo and ensure your face is clearly visible.');
+            }
+
+            // Validate embeddings are actually valid numbers
+            if (!Array.isArray(faceEmbeddings) || faceEmbeddings.some(val => typeof val !== 'number' || isNaN(val))) {
+                throw new Error('Invalid face embedding data generated. Please try again.');
+            }
+
+            console.log(`✓ Face embeddings generated successfully: ${faceEmbeddings.length} dimensions`);
+            addNotification('SUCCESS', 'Biometric Success', 'Face data processed.');
+
+            // 4. Create User Account
             await signUp(formData.email, formData.firstName, formData.lastName, {
                 ...formData,
                 email: formData.email,
                 age,
-                kycDocUrl: kycUrl, // Maps to Aadhaar Doc
+                kycDocUrl: kycUrl,
                 epicDocUrl: epicUrl,
                 faceUrl: faceUrl,
-                idNumber: formData.aadhaarNumber, // Legacy field fallback
+                idNumber: formData.aadhaarNumber,
                 idType: 'AADHAAR'
             });
 
 
-            // 4. AI Identity Verification (Face vs ID Doc)
+            // 5. Electoral Roll Verification + AI Identity Verification
             let verificationStatus = 'PENDING';
             let electoralRollVerified = false;
-            let manualVerifyRequested = true;
+            let electoralRollMatchId: string | null = null;
+            let manualVerifyRequested = false;
+            let verificationMessage = '';
 
-            // Determine which doc to use for verification (Aadhaar preferred, then EPIC)
-            const verifyFile = aadhaarFile || epicFile;
-            const docUrlForAI = kycUrl || epicUrl;
+            // 5a. Electoral Roll Cross-Check
+            console.time('ElectoralRollVerification');
+            setLoadingMessage('Verifying against Electoral Roll...');
 
-            if (faceBase64 && verifyFile) {
+            try {
+                const { verifyAgainstElectoralRoll } = await import('../services/electoralRollService');
+                const electoralResult = await verifyAgainstElectoralRoll({
+                    aadhaarNumber: formData.aadhaarNumber,
+                    epicNumber: formData.epicNumber,
+                    firstName: formData.firstName,
+                    lastName: formData.lastName,
+                    fatherName: formData.fatherName,
+                    dob: formData.dob,
+                    state: formData.state,
+                    district: formData.district,
+                    city: formData.city
+                });
+
+                console.timeEnd('ElectoralRollVerification');
+                console.log('Electoral Roll Result:', electoralResult);
+
+                if (electoralResult.found) {
+                    // Found in electoral roll
+                    electoralRollMatchId = electoralResult.match?.id || null;
+
+                    if (electoralResult.verified) {
+                        // Perfect match - auto-verify electoral roll BUT keep biometric unverified
+                        electoralRollVerified = true;
+                        verificationStatus = 'PENDING'; // Still needs biometric verification
+                        manualVerifyRequested = false;
+                        verificationMessage = electoralResult.message;
+                        addNotification('SUCCESS', 'Electoral Roll Verified', 'Your data matches official voter records.');
+                    } else {
+                        // Data mismatch - flag for manual review
+                        electoralRollVerified = false;
+                        verificationStatus = 'PENDING';
+                        manualVerifyRequested = true;
+                        verificationMessage = electoralResult.message;
+
+                        const mismatchDetails = [];
+                        if (!electoralResult.details.nameMatch) mismatchDetails.push('Name');
+                        if (!electoralResult.details.dobMatch) mismatchDetails.push('DOB');
+                        if (!electoralResult.details.fatherNameMatch) mismatchDetails.push('Father Name');
+                        if (!electoralResult.details.addressMatch) mismatchDetails.push('Address');
+
+                        addNotification('WARNING', 'Data Mismatch',
+                            `Mismatch detected: ${mismatchDetails.join(', ')}. Manual review required.`);
+                    }
+                } else {
+                    // Not found in electoral roll - ALLOW registration but notify
+                    electoralRollVerified = false;
+                    verificationStatus = 'PENDING';
+                    manualVerifyRequested = false;
+                    verificationMessage = electoralResult.message;
+                    addNotification('INFO', 'Electoral Roll Not Found',
+                        'Your data is not registered in the voter list. You may not generate your voter ID till now.');
+                }
+            } catch (electoralErr) {
+                console.warn('Electoral Roll Check Error (non-fatal):', electoralErr);
+                addNotification('WARNING', 'Electoral Roll Check Failed',
+                    'Could not verify against electoral roll. Proceeding with registration.');
+            }
+
+            // 5b. AI Biometric Verification (Face vs ID Document)
+            setLoadingMessage('Verifying biometric data...');
+            const docOpt = optimizedAadhaar || optimizedEpic;
+            if (docOpt && docOpt.blob.type !== 'application/pdf') {
                 try {
-                    setLoadingMessage('AI Verification: Checking Face against ID...');
-
-                    // Convert local file to base64 for immediate verification (no download needed)
-                    // The result includes the "data:image/..." prefix, so we strip it for the service if needed,
-                    // but the updated service can handle it or we clean it here. 
-                    // VerifyIdentityAgainstDoc expects clean base64 usually, or handles it. 
-                    // Looking at service, urlToBase64 strips it. Let's strip it here to be safe/consistent.
-                    const fileBase64Full = await fileToBase64(verifyFile);
-                    const docBase64Clean = fileBase64Full.split(',')[1];
-
-                    // Use the NEW optimized signature: pass base64 directly + existing embeddings
-                    const { verified, message } = await verifyIdentityAgainstDoc(
-                        faceBase64,
-                        docBase64Clean,
+                    console.time('AIVerification');
+                    const { verified } = await verifyIdentityAgainstDoc(
+                        optimizedFace.base64,
+                        docOpt.base64,
                         faceEmbeddings
                     );
+                    console.timeEnd('AIVerification');
 
                     if (verified) {
-                        verificationStatus = 'VERIFIED';
-                        electoralRollVerified = true;
-                        manualVerifyRequested = false;
-                        addNotification('SUCCESS', 'Instant Verification', 'Your identity has been AI-Verified against your ID proof.');
+                        // Biometric matches ID document
+                        if (electoralRollVerified) {
+                            // BOTH electoral roll AND biometric verified - FULLY VERIFIED
+                            verificationStatus = 'VERIFIED';
+                            addNotification('SUCCESS', 'Full Verification Complete',
+                                'Electoral roll and biometric verification successful!');
+                        } else {
+                            // Biometric verified but electoral roll not verified
+                            verificationStatus = 'PENDING';
+                            addNotification('SUCCESS', 'Biometric Verified',
+                                'Face matches ID document. Electoral roll verification pending.');
+                        }
                     } else {
-                        console.warn('AI Verification Failed during signup:', message);
+                        // Biometric verification failed - BLOCK registration
+                        throw new Error('Biometric verification failed: Face does not match ID document. Please ensure you are using your own ID and photo.');
                     }
-                } catch (aiErr) {
-                    console.error('AI Check Error:', aiErr);
+                } catch (aiErr: any) {
+                    // CRITICAL: Biometric verification is MANDATORY
+                    console.error('AI Biometric Verification Error:', aiErr);
+                    throw new Error(aiErr.message || 'Biometric verification failed. Please ensure DeepFace service is running and try again.');
                 }
+            } else {
+                // No ID document provided or it's a PDF
+                addNotification('WARNING', 'Biometric Verification Skipped',
+                    'ID document is PDF or missing. Manual review will be required.');
+                manualVerifyRequested = true;
             }
 
-            // Persist embeddings + verification status into profiles table
-            if (faceEmbeddings && faceEmbeddings.length > 0) {
-                const { data } = await supabase.auth.getUser();
-                const currentUser = data?.user;
-                if (currentUser) {
-                    const { error: updateError } = await supabase
-                        .from('profiles')
-                        .update({
-                            face_embeddings: faceEmbeddings,
-                            liveness_verified: true,
-                            verification_status: verificationStatus,
-                            electoral_roll_verified: electoralRollVerified,
-                            manual_verify_requested: manualVerifyRequested,
-                            manual_verify_requested_at: manualVerifyRequested ? new Date().toISOString() : null
-                        })
-                        .eq('id', currentUser.id);
+            // 6. Update Profile
+            const { data: { user: currentUser } } = await supabase.auth.getUser();
 
-                    if (updateError) {
-                        console.error('Failed to save face embeddings:', updateError);
-                        addNotification('WARNING', 'Partial Success', 'Account created but face data sync failed. Contact admin.');
-                    }
-                }
+            if (currentUser) {
+                await supabase
+                    .from('profiles')
+                    .update({
+                        face_embeddings: faceEmbeddings,
+                        liveness_verified: true,
+                        verification_status: verificationStatus,
+                        electoral_roll_verified: electoralRollVerified,
+                        electoral_roll_match_id: electoralRollMatchId,
+                        manual_verify_requested: manualVerifyRequested,
+                        manual_verify_requested_at: manualVerifyRequested ? new Date().toISOString() : null,
+                        verification_rejection_reason: verificationMessage || (manualVerifyRequested ? 'Manual review needed' : null)
+                    })
+                    .eq('id', currentUser.id);
             }
 
-            addNotification('SUCCESS', 'Registration Complete', 'Your secure voter profile has been created with biometric data.');
+
+            addNotification('SUCCESS', 'Registration Complete', 'Your secure voter profile has been created.');
+            console.timeEnd('RegistrationTotal');
             navigate('/User');
+
         } catch (err: any) {
-            addNotification('ERROR', 'Registration Failed', err.message);
+            console.error('Registration Error:', err);
+            addNotification('ERROR', 'Registration Failed', err.message || 'Unknown error');
         } finally {
+            if (loadingTimeoutRef.current) clearTimeout(loadingTimeoutRef.current);
             setLoading(false);
         }
     };
@@ -495,6 +679,7 @@ export const Signup = () => {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <Input label="First Name" name="firstName" value={formData.firstName} onChange={handleChange} required className="capitalize" />
                                 <Input label="Last Name" name="lastName" value={formData.lastName} onChange={handleChange} required className="capitalize" />
+                                <Input label="Father Name" name="fatherName" value={formData.fatherName} onChange={handleChange} placeholder="For electoral roll verification" className="capitalize" fullWidth />
                                 <Input label="Email Address" name="email" type="email" value={formData.email} onChange={handleChange} required fullWidth />
                                 <Input label="Phone Number" name="phone" type="tel" value={formData.phone} onChange={handleChange} required />
                                 <Input label="Date of Birth" name="dob" type="date" value={formData.dob} onChange={handleChange} required />

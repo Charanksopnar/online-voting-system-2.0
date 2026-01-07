@@ -16,6 +16,7 @@ import { UserDashboard } from './pages/user/UserDashboard';
 import { EditProfile } from './pages/user/EditProfile';
 import { UserNotifications } from './pages/user/UserNotifications';
 import { IdVerification } from './pages/user/IdVerification';
+import { BiometricVerification } from './pages/user/BiometricVerification';
 import { VotingPage } from './pages/user/VotingPage';
 import { FaceCapturePreview } from './pages/user/FaceCapturePreview';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
@@ -76,7 +77,9 @@ export default function App() {
                   <Route path="/Edit" element={<ProtectedRoute allowedRoles={[UserRole.VOTER]}><EditProfile /></ProtectedRoute>} />
                   <Route path="/notifications" element={<ProtectedRoute allowedRoles={[UserRole.VOTER]}><UserNotifications /></ProtectedRoute>} />
                   <Route path="/IdVerification" element={<ProtectedRoute allowedRoles={[UserRole.VOTER]}><IdVerification /></ProtectedRoute>} />
-                  <Route path="/verify-id" element={<Navigate to="/IdVerification" replace />} />
+                  <Route path="/BiometricVerification" element={<ProtectedRoute allowedRoles={[UserRole.VOTER]}><BiometricVerification /></ProtectedRoute>} />
+                  <Route path="/verify-id" element={<Navigate to="/BiometricVerification" replace />} />
+                  <Route path="/verify" element={<Navigate to="/BiometricVerification" replace />} />
                   <Route path="/Vote/:id" element={<ProtectedRoute allowedRoles={[UserRole.VOTER]}><VotingPage /></ProtectedRoute>} />
                   <Route path="/face-capture-preview" element={<ProtectedRoute allowedRoles={[UserRole.VOTER]}><FaceCapturePreview /></ProtectedRoute>} />
                 </Route>

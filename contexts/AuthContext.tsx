@@ -70,47 +70,123 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     userRef.current = user;
   }, [user]);
 
+  // Track if this is the initial mount to prevent listener interference
+  const isInitialMountRef = React.useRef(true);
+
   useEffect(() => {
-    // Check active sessions on mount - priority: voter first, then admin
+    // Check active sessions on mount with optimizations
     const checkSessions = async () => {
       try {
-        // Priority 1: Check voter session
-        const { data: { session: voterSession } } = await supabaseVoter.auth.getSession();
-        if (voterSession?.user) {
-          const { data: profile, error: profileError } = await supabaseVoter
-            .from('profiles')
-            .select('*')
-            .eq('id', voterSession.user.id)
-            .single();
+        // Try to use cached profile first for instant restoration
+        const cachedProfileStr = localStorage.getItem('cachedUserProfile');
+        const cachedRole = localStorage.getItem('lastUserRole');
 
-          if (!profileError && profile?.role === 'VOTER') {
-            setUser(mapProfileToUser(profile));
-            setLoading(false);
-            return; // ✅ Found valid voter session, stop checking
+        if (cachedProfileStr) {
+          try {
+            const cached = JSON.parse(cachedProfileStr);
+            const cacheAge = Date.now() - (cached.timestamp || 0);
+
+            // Use cache if less than 5 minutes old
+            if (cacheAge < 5 * 60 * 1000) {
+              console.log('[Session] Using cached profile for instant restore');
+              setUser(cached.profile);
+              setLoading(false);
+
+              // Verify session in background (don't block UI)
+              setTimeout(() => {
+                const client = cached.profile.role === 'ADMIN' ? supabaseAdmin : supabaseVoter;
+                client.auth.getSession().then(({ data: { session } }) => {
+                  if (!session) {
+                    // Session expired, clear cache and user
+                    console.log('[Session] Cached session expired, clearing');
+                    localStorage.removeItem('cachedUserProfile');
+                    localStorage.removeItem('lastUserRole');
+                    setUser(null);
+                  }
+                });
+              }, 100);
+
+              return; // Exit early with cached data
+            }
+          } catch (e) {
+            console.warn('[Session] Failed to parse cached profile:', e);
+            localStorage.removeItem('cachedUserProfile');
           }
         }
 
-        // Priority 2: Check admin session (only if no voter session found)
-        const { data: { session: adminSession } } = await supabaseAdmin.auth.getSession();
-        if (adminSession?.user) {
-          const { data: profile, error: profileError } = await supabaseAdmin
-            .from('profiles')
-            .select('*')
-            .eq('id', adminSession.user.id)
-            .single();
+        // Create timeout promise (3 seconds - reduced from 5)
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Session check timeout')), 3000)
+        );
 
-          if (!profileError && profile?.role === 'ADMIN') {
-            setUser(mapProfileToUser(profile));
-            setLoading(false);
-            return; // ✅ Found valid admin session
+        // Helper to check a specific client
+        const checkClient = async (client: any, expectedRole: string) => {
+          try {
+            const { data: { session } } = await client.auth.getSession();
+            if (session?.user) {
+              const { data: profile, error: profileError } = await client
+                .from('profiles')
+                .select('*')
+                .eq('id', session.user.id)
+                .single();
+
+              if (!profileError && profile?.role === expectedRole) {
+                return profile;
+              }
+            }
+          } catch (error) {
+            console.error(`[Session] Error checking ${expectedRole}:`, error);
           }
+          return null;
+        };
+
+        // Check BOTH clients in TRUE PARALLEL (not sequential)
+        const result = await Promise.race([
+          Promise.all([
+            checkClient(supabaseVoter, 'VOTER'),
+            checkClient(supabaseAdmin, 'ADMIN')
+          ]),
+          timeoutPromise
+        ]).catch(() => [null, null]) as [any, any];
+
+        const [voterProfile, adminProfile] = result;
+
+        // Use whichever profile was found, prioritizing cached role
+        let profile = null;
+        if (cachedRole === 'ADMIN' && adminProfile) {
+          profile = adminProfile;
+        } else if (cachedRole === 'VOTER' && voterProfile) {
+          profile = voterProfile;
+        } else {
+          // No cached preference, use whichever was found
+          profile = voterProfile || adminProfile;
         }
 
-        // No valid session found
+        if (profile) {
+          const mappedUser = mapProfileToUser(profile);
+          setUser(mappedUser);
+
+          // Cache the profile and role for next time
+          localStorage.setItem('lastUserRole', profile.role);
+          localStorage.setItem('cachedUserProfile', JSON.stringify({
+            profile: mappedUser,
+            timestamp: Date.now()
+          }));
+
+          console.log('[Session] Session restored:', profile.email);
+        } else {
+          console.log('[Session] No active session found');
+        }
+
         setLoading(false);
       } catch (error) {
         console.error('Session check failed:', error);
         setLoading(false);
+      } finally {
+        // Mark initial mount as complete
+        setTimeout(() => {
+          isInitialMountRef.current = false;
+        }, 1000);
       }
     };
 
@@ -120,16 +196,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const voterSubscription = supabaseVoter.auth.onAuthStateChange(async (event, session) => {
       console.log('[Voter Auth Event]:', event, session?.user?.id);
 
+      // Ignore events during initial mount to prevent interference
+      if (isInitialMountRef.current && event !== 'SIGNED_OUT') {
+        console.log('[Voter] Ignoring event during initial mount:', event);
+        return;
+      }
+
       if (event === 'SIGNED_OUT') {
         // Only clear user if current user is a voter
         setUser(prev => {
           if (prev?.role === 'VOTER') {
             console.log('[Voter] Signing out voter user');
+            localStorage.removeItem('cachedUserProfile');
+            localStorage.removeItem('lastUserRole');
             return null;
           }
           return prev;
         });
-      } else if (event === 'SIGNED_IN' && session?.user) {
+      } else if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user) {
         // Fetch profile immediately (no setTimeout to avoid race conditions)
         try {
           const { data: profile, error: profileError } = await supabaseVoter
@@ -140,7 +224,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
           if (!profileError && profile?.role === 'VOTER') {
             console.log('[Voter] Setting voter user:', profile.email);
-            setUser(mapProfileToUser(profile));
+            const mappedUser = mapProfileToUser(profile);
+            setUser(mappedUser);
+
+            // Update cache
+            localStorage.setItem('lastUserRole', profile.role);
+            localStorage.setItem('cachedUserProfile', JSON.stringify({
+              profile: mappedUser,
+              timestamp: Date.now()
+            }));
           }
         } catch (error) {
           console.error('[Voter] Failed to fetch profile:', error);
@@ -152,16 +244,24 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const adminSubscription = supabaseAdmin.auth.onAuthStateChange(async (event, session) => {
       console.log('[Admin Auth Event]:', event, session?.user?.id);
 
+      // Ignore events during initial mount to prevent interference
+      if (isInitialMountRef.current && event !== 'SIGNED_OUT') {
+        console.log('[Admin] Ignoring event during initial mount:', event);
+        return;
+      }
+
       if (event === 'SIGNED_OUT') {
         // Only clear user if current user is an admin
         setUser(prev => {
           if (prev?.role === 'ADMIN') {
             console.log('[Admin] Signing out admin user');
+            localStorage.removeItem('cachedUserProfile');
+            localStorage.removeItem('lastUserRole');
             return null;
           }
           return prev;
         });
-      } else if (event === 'SIGNED_IN' && session?.user) {
+      } else if ((event === 'SIGNED_IN' || event === 'INITIAL_SESSION') && session?.user) {
         // Fetch profile immediately (no setTimeout to avoid race conditions)
         try {
           const { data: profile, error: profileError } = await supabaseAdmin
@@ -172,7 +272,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
           if (!profileError && profile?.role === 'ADMIN') {
             console.log('[Admin] Setting admin user:', profile.email);
-            setUser(mapProfileToUser(profile));
+            const mappedUser = mapProfileToUser(profile);
+            setUser(mappedUser);
+
+            // Update cache
+            localStorage.setItem('lastUserRole', profile.role);
+            localStorage.setItem('cachedUserProfile', JSON.stringify({
+              profile: mappedUser,
+              timestamp: Date.now()
+            }));
           }
         } catch (error) {
           console.error('[Admin] Failed to fetch profile:', error);
@@ -261,7 +369,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         throw new Error(`Account Blocked: ${profile.block_reason}`);
       }
 
-      setUser(mapProfileToUser(profile));
+      const mappedUser = mapProfileToUser(profile);
+      setUser(mappedUser);
+
+      // Cache role and full profile for faster session checks on next load
+      localStorage.setItem('lastUserRole', profile.role);
+      localStorage.setItem('cachedUserProfile', JSON.stringify({
+        profile: mappedUser,
+        timestamp: Date.now()
+      }));
+
       addNotification('SUCCESS', 'Welcome back', `Logged in as ${profile.first_name}`);
     } catch (error: any) {
       console.error("Login error:", error);
@@ -330,6 +447,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // Sign out from the correct client based on current user role
     const client = user.role === 'ADMIN' ? supabaseAdmin : supabaseVoter;
     await client.auth.signOut();
+
+    // Clear cached role preference
+    localStorage.removeItem('lastUserRole');
+
     setUser(null);
     addNotification('INFO', 'Signed Out', 'See you next time!');
   };

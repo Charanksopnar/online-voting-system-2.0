@@ -11,6 +11,7 @@ export const VotersManagement = () => {
     const [filterDistrict, setFilterDistrict] = useState('');
     const [search, setSearch] = useState('');
     const [selectedVoter, setSelectedVoter] = useState<any>(null);
+    const [voterToDelete, setVoterToDelete] = useState<any>(null);
 
     const filtered = useMemo(() => {
         return voters.filter(v => {
@@ -47,6 +48,21 @@ export const VotersManagement = () => {
 
     const handleCrossVerify = async (voterId: string, officialVoterId: string) => {
         await crossVerifyElectoralRoll(voterId, officialVoterId);
+    };
+
+    const handleDeleteClick = (voter: any) => {
+        setVoterToDelete(voter);
+    };
+
+    const confirmDelete = async () => {
+        if (voterToDelete) {
+            await deleteVoter(voterToDelete.id);
+            setVoterToDelete(null);
+        }
+    };
+
+    const cancelDelete = () => {
+        setVoterToDelete(null);
     };
 
     return (
@@ -182,7 +198,7 @@ export const VotersManagement = () => {
                                             <button onClick={() => setSelectedVoter(voter)} className="p-2 rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition">
                                                 <Eye size={16} />
                                             </button>
-                                            <button onClick={() => deleteVoter(voter.id)} className="p-2 rounded-lg bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 transition">
+                                            <button onClick={() => handleDeleteClick(voter)} className="p-2 rounded-lg bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 transition">
                                                 <Trash2 size={16} />
                                             </button>
                                         </div>
@@ -199,6 +215,52 @@ export const VotersManagement = () => {
                     Total Records: {filtered.length}
                 </div>
             </div>
+
+            {/* Delete Confirmation Modal */}
+            {voterToDelete && (
+                <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+                    <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-md w-full overflow-hidden border border-slate-200 dark:border-slate-700">
+                        <div className="bg-red-600 text-white p-6 flex items-center gap-3">
+                            <Trash2 size={24} />
+                            <div>
+                                <h3 className="text-xl font-bold">Confirm Deletion</h3>
+                                <p className="text-red-100 text-sm">This action cannot be undone</p>
+                            </div>
+                        </div>
+                        <div className="p-6">
+                            <p className="text-slate-700 dark:text-slate-300 mb-4">
+                                Are you sure you want to delete voter <span className="font-bold text-slate-900 dark:text-white capitalize">{voterToDelete.firstName} {voterToDelete.lastName}</span>?
+                            </p>
+                            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-3 mb-4">
+                                <p className="text-yellow-800 dark:text-yellow-300 text-sm font-medium flex items-center gap-2">
+                                    <AlertCircle size={16} />
+                                    This will permanently remove:
+                                </p>
+                                <ul className="text-yellow-700 dark:text-yellow-400 text-xs mt-2 ml-6 list-disc space-y-1">
+                                    <li>Voter profile and account</li>
+                                    <li>All associated votes</li>
+                                    <li>Verification records</li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div className="p-6 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-3 bg-slate-50 dark:bg-slate-800/50">
+                            <button
+                                onClick={cancelDelete}
+                                className="px-4 py-2 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-lg transition font-medium"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={confirmDelete}
+                                className="px-4 py-2 bg-red-600 text-white hover:bg-red-700 rounded-lg transition font-medium flex items-center gap-2"
+                            >
+                                <Trash2 size={16} />
+                                Delete Voter
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Detail Modal */}
             {selectedVoter && (

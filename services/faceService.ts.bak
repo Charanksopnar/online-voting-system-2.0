@@ -71,7 +71,7 @@ export async function detectAndCountFaces(base64Frame: string): Promise<{ faceCo
                 img_path: `data:image/jpeg;base64,${base64Frame}`,
                 model_name: 'Facenet',
                 detector_backend: 'opencv',
-                enforce_detection: true,
+                enforce_detection: true, // STRICT: Must detect faces
             }),
             signal: controller.signal
         });
@@ -81,27 +81,16 @@ export async function detectAndCountFaces(base64Frame: string): Promise<{ faceCo
 
         console.log('Face Detection Response:', JSON.stringify(data, null, 2));
 
+        // Count faces from response
         let faceCount = 0;
-        let totalFaces = 0;
 
         if (data.results && Array.isArray(data.results)) {
-            totalFaces = data.results.length;
-
-            // Filter out tiny faces (likely false positives from background noise)
-            const MIN_FACE_SIZE = 100;
-            const validFaces = data.results.filter((face: any) => {
-                if (!face.facial_area) return false;
-                const area = face.facial_area.w * face.facial_area.h;
-                const minArea = MIN_FACE_SIZE * MIN_FACE_SIZE;
-                return area >= minArea;
-            });
-
-            faceCount = validFaces.length;
-            console.log(`Detected ${totalFaces} total faces, ${faceCount} valid faces (filtered out ${totalFaces - faceCount} tiny faces < ${MIN_FACE_SIZE}x${MIN_FACE_SIZE}px)`);
+            faceCount = data.results.length;
         } else if (Array.isArray(data)) {
             faceCount = data.length;
         }
 
+        // SECURITY VALIDATION
         if (faceCount === 0) {
             return {
                 faceCount: 0,
@@ -124,6 +113,7 @@ export async function detectAndCountFaces(base64Frame: string): Promise<{ faceCo
             throw new Error('Face detection timed out. Please try again.');
         }
 
+        // Handle "Face could not be detected" error from DeepFace
         if (err.message?.includes('Face could not be detected') || err.message?.includes('no face')) {
             return {
                 faceCount: 0,
@@ -138,6 +128,7 @@ export async function detectAndCountFaces(base64Frame: string): Promise<{ faceCo
 }
 
 async function getEmbeddingFromDocker(base64Frame: string, skipFaceCountCheck: boolean = false): Promise<number[]> {
+    // SECURITY: Check for multiple faces BEFORE processing embeddings
     if (!skipFaceCountCheck) {
         const faceCheck = await detectAndCountFaces(base64Frame);
         if (faceCheck.faceCount !== 1) {
@@ -146,7 +137,7 @@ async function getEmbeddingFromDocker(base64Frame: string, skipFaceCountCheck: b
     }
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout (balanced for speed + reliability)
 
     let response;
     try {
@@ -159,7 +150,7 @@ async function getEmbeddingFromDocker(base64Frame: string, skipFaceCountCheck: b
                 img_path: `data:image/jpeg;base64,${base64Frame}`,
                 model_name: 'Facenet',
                 detector_backend: 'opencv',
-                enforce_detection: true,
+                enforce_detection: true, // STRICT: Changed to true for security
             }),
             signal: controller.signal
         });
@@ -183,18 +174,21 @@ async function getEmbeddingFromDocker(base64Frame: string, skipFaceCountCheck: b
 
     let embedding: number[] | undefined;
 
+    // DeepFace API returns: { results: [ { embedding: [...], ... } ] }
     if (data.results && Array.isArray(data.results) && data.results.length > 0) {
         const first = data.results[0];
         if (first && Array.isArray(first.embedding)) {
             embedding = first.embedding;
         }
     }
+    // Fallback: direct array format (older API versions)
     else if (Array.isArray(data)) {
         const first = data[0];
         if (first && Array.isArray(first.embedding)) {
             embedding = first.embedding;
         }
     }
+    // Fallback: flat embedding format
     else if (Array.isArray(data.embedding)) {
         embedding = data.embedding;
     }
@@ -206,6 +200,7 @@ async function getEmbeddingFromDocker(base64Frame: string, skipFaceCountCheck: b
     return embedding;
 }
 
+// Helper for single-image embedding extraction from other parts of the app
 export async function getEmbeddingForBase64Image(base64Image: string): Promise<number[]> {
     return getEmbeddingFromDocker(base64Image);
 }
@@ -257,120 +252,55 @@ export async function registerFace(
     }
 }
 
-/**
- * PRODUCTION: Verify user face with DeepFace backend
- * This is the main verification function that:
- * 1. Loads stored embedding from database
- * 2. Compares with live captured frames using DeepFace
- * 3. Returns detailed verification result with score
- */
-export async function verifyUserWithDeepFace(
-    capturedFrames: string[],
-    storedEmbedding: number[]
-): Promise<{
-    success: boolean;
-    score: number; // 0-100 percentage
-    confidence: number; // 0-1 decimal
-    distance: number;
-    message: string;
-}> {
+export async function verifyFace(
+    liveFrames: string[],
+    storedEmbedding: number[],
+): Promise<FaceVerificationResult> {
     try {
-        // Step 1: Validate inputs
-        if (!capturedFrames || capturedFrames.length === 0) {
+        const liveness = checkLiveness(liveFrames);
+        if (!liveness.ok) {
             return {
-                success: false,
-                score: 0,
+                match: false,
                 confidence: 0,
-                distance: 999,
-                message: 'No frames provided for verification',
+                message: liveness.message || 'Liveness check failed.',
             };
         }
 
         if (!storedEmbedding || storedEmbedding.length === 0) {
             return {
-                success: false,
-                score: 0,
+                match: false,
                 confidence: 0,
-                distance: 999,
-                message: 'No stored face embedding found. Please re-register your face.',
+                message: 'No stored face embedding found for this user.',
             };
         }
 
-        // Step 2: Basic liveness check (ensures frames are different)
-        const liveness = checkLiveness(capturedFrames);
-        if (!liveness.ok) {
-            return {
-                success: false,
-                score: 0,
-                confidence: 0,
-                distance: 999,
-                message: liveness.message || 'Liveness check failed.',
-            };
-        }
+        const middleIndex = Math.floor(liveFrames.length / 2);
+        const liveFrame = liveFrames[middleIndex];
 
-        // Step 3: Select best frame (middle frame usually has best quality)
-        const middleIndex = Math.floor(capturedFrames.length / 2);
-        const selectedFrame = capturedFrames[middleIndex];
+        const liveEmbedding = await getEmbeddingFromDocker(liveFrame);
 
-        console.log('[VerifyUser] Sending frame to DeepFace for embedding extraction...');
-
-        // Step 4: Get live embedding from DeepFace
-        const liveEmbedding = await getEmbeddingFromDocker(selectedFrame);
-
-        console.log('[VerifyUser] Comparing embeddings...');
-        console.log('[VerifyUser] Stored embedding length:', storedEmbedding.length);
-        console.log('[VerifyUser] Live embedding length:', liveEmbedding.length);
-
-        // Step 5: Compute distance between embeddings
         const distance = computeDistance(storedEmbedding, liveEmbedding);
-        console.log('[VerifyUser] Computed distance:', distance.toFixed(3));
-
-        // Step 6: Convert to confidence and score
-        const confidence = distanceToConfidence(distance);
-        const score = Math.round(confidence * 100); // 0-100 percentage
-
-        // Step 7: Determine match based on threshold
         const threshold = 10.0;
-        const success = distance < threshold;
-
-        console.log('[VerifyUser] Match:', success, '| Score:', score, '| Confidence:', confidence.toFixed(3));
+        const match = distance < threshold;
+        const confidence = distanceToConfidence(distance);
 
         return {
-            success,
-            score,
+            match,
             confidence,
             distance: Number(distance.toFixed(3)),
-            message: success
-                ? `Identity verified with ${score}% confidence`
-                : `Verification failed. Match score: ${score}% (minimum 60% required)`,
+            message: match ? 'Face verified successfully' : 'Face verification failed',
         };
     } catch (error: any) {
-        console.error('[VerifyUser] Error:', error);
+        console.error('Face verification error via DeepFace Docker:', error);
         return {
-            success: false,
-            score: 0,
+            match: false,
             confidence: 0,
-            distance: 999,
-            message: error?.message || 'DeepFace service unavailable. Please ensure Docker container is running.',
+            message:
+                error?.message ||
+                'Could not connect to face recognition service. Make sure the DeepFace Docker container is running on port 5000.',
         };
     }
 }
-
-// Legacy function - kept for backward compatibility
-export async function verifyFace(
-    liveFrames: string[],
-    storedEmbedding: number[],
-): Promise<FaceVerificationResult> {
-    const result = await verifyUserWithDeepFace(liveFrames, storedEmbedding);
-    return {
-        match: result.success,
-        confidence: result.confidence,
-        distance: result.distance,
-        message: result.message,
-    };
-}
-
-// Note: Client-side face detection is now handled by tensorFaceService.ts
 
 async function urlToBase64(url: string): Promise<string> {
     try {
@@ -380,6 +310,7 @@ async function urlToBase64(url: string): Promise<string> {
             const reader = new FileReader();
             reader.onloadend = () => {
                 const base64String = reader.result as string;
+                // Remove data:image/jpeg;base64, prefix if present
                 const base64Content = base64String.includes(',') ? base64String.split(',')[1] : base64String;
                 resolve(base64Content);
             };
@@ -392,35 +323,45 @@ async function urlToBase64(url: string): Promise<string> {
     }
 }
 
+
 export async function verifyIdentityAgainstDoc(
     liveFaceBase64: string,
-    docData: string,
+    docData: string, // Can be URL or Base64 (cleaned)
     existingLiveEmbedding?: number[],
     existingDocEmbedding?: number[]
 ): Promise<{ verified: boolean; confidence: number; message: string }> {
     try {
+        // 1. Get Live Face Embedding (WITH face count check for security)
+        // Use existing embedding if provided to save a call, otherwise compute it
         let liveEmbedding = existingLiveEmbedding;
         if (!liveEmbedding) {
-            liveEmbedding = await getEmbeddingFromDocker(liveFaceBase64, false);
+            liveEmbedding = await getEmbeddingFromDocker(liveFaceBase64, false); // Enforce face count check
         }
 
+        // 2. Get Doc Face Embedding (SKIP face count check for ID documents)
         let docEmbedding = existingDocEmbedding;
 
         if (!docEmbedding) {
             let docBase64 = docData;
+            // If it looks like a URL, download it (fallback support)
             if (docData.startsWith('http')) {
                 console.log('Fetching ID document via URL for verification...');
                 docBase64 = await urlToBase64(docData);
             } else {
                 console.log('Using provided base64 ID document for verification...');
             }
+            // Skip face count check for documents (they may have different formats)
             docEmbedding = await getEmbeddingFromDocker(docBase64, true);
         } else {
             console.log('Using existing document embedding for verification...');
         }
 
+        // 3. Compare
         const distance = computeDistance(liveEmbedding!, docEmbedding);
         const confidence = distanceToConfidence(distance);
+
+        // Stricter threshold for auto-approval (e.g., 90% confidence or distance < 10)
+        // distance < 10 is the same as verifyFace
         const isMatch = distance < 10.0;
 
         return {
@@ -437,26 +378,4 @@ export async function verifyIdentityAgainstDoc(
             message: 'Could not automatically verify against ID document. Manual review required.'
         };
     }
-}
-
-/**
- * Generate a verification token after successful face match.
- * This token can be submitted with the vote for server-side validation.
- */
-export function generateVerificationToken(
-    voterId: string,
-    electionId: string,
-    confidence: number
-): string {
-    const timestamp = Date.now();
-    const expiresAt = timestamp + (5 * 60 * 1000); // 5 minutes expiry
-    const payload = {
-        voterId,
-        electionId,
-        confidence,
-        timestamp,
-        expiresAt,
-        nonce: Math.random().toString(36).substring(2, 15)
-    };
-    return btoa(JSON.stringify(payload));
 }

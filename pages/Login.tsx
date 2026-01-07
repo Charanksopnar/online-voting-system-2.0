@@ -33,8 +33,19 @@ export const Login = ({ adminMode = false }: { adminMode?: boolean }) => {
 
             {/* Left Side: Art/Info (Hidden on Mobile) */}
             <div className={`hidden lg:flex lg:w-1/2 relative overflow-hidden ${adminMode ? 'bg-slate-900' : 'bg-primary-900'}`}>
-                <div className="absolute inset-0 opacity-20 bg-[url('https://images.unsplash.com/photo-1540910419868-474947ce571d?auto=format&fit=crop&q=80')] bg-cover bg-center mix-blend-overlay"></div>
-                <div className={`absolute inset-0 bg-gradient-to-br ${adminMode ? 'from-slate-900/90 to-black/90' : 'from-primary-900/90 to-black/80'}`}></div>
+                {/* Modern gradient background instead of external image */}
+                <div className={`absolute inset-0 bg-gradient-to-br ${adminMode
+                    ? 'from-slate-900 via-slate-800 to-slate-950'
+                    : 'from-primary-900 via-primary-800 to-primary-950'
+                    }`}></div>
+
+                {/* Animated gradient overlay */}
+                <div className="absolute inset-0 opacity-30">
+                    <div className={`absolute inset-0 bg-gradient-to-tr ${adminMode
+                        ? 'from-blue-500/20 via-transparent to-purple-500/20'
+                        : 'from-primary-500/20 via-transparent to-primary-300/20'
+                        } animate-pulse`} style={{ animationDuration: '4s' }}></div>
+                </div>
 
                 <div className="relative z-10 flex flex-col justify-center px-16 text-white h-full">
                     <div className="mb-8">
@@ -72,48 +83,50 @@ export const Login = ({ adminMode = false }: { adminMode?: boolean }) => {
                     </div>
 
                     <form className="space-y-6" onSubmit={handleSubmit}>
-                        <div className="space-y-4">
+                        <div className="space-y-6">
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Email Address</label>
-                                <div className="relative">
-                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                        <Mail className="h-5 w-5 text-slate-400" />
-                                    </div>
-                                    <input
-                                        type="email"
-                                        required
-                                        className="input-standard pl-12"
-                                        placeholder="name@example.com"
-                                        value={email}
-                                        onChange={(e) => setEmail(e.target.value.toLowerCase())}
-                                    />
-                                </div>
+                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Email Address</label>
+                                <input
+                                    type="email"
+                                    required
+                                    className="input-standard"
+                                    placeholder="name@example.com"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value.toLowerCase())}
+                                />
                             </div>
 
                             <div>
-                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">Password</label>
-                                <div className="relative">
-                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                        <Lock className="h-5 w-5 text-slate-400" />
-                                    </div>
-                                    <input
-                                        type="password"
-                                        required
-                                        className="input-standard pl-12"
-                                        placeholder="••••••••"
-                                        value={password}
-                                        onChange={(e) => setPassword(e.target.value)}
-                                    />
-                                </div>
+                                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Password</label>
+                                <input
+                                    type="password"
+                                    required
+                                    className="input-standard"
+                                    placeholder="••••••••"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                />
                             </div>
                         </div>
 
                         <button
                             type="submit"
                             disabled={loading}
-                            className="w-full flex items-center justify-center py-3.5 px-4 border border-transparent rounded-xl shadow-lg shadow-primary-500/30 text-sm font-bold text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 transition-all transform hover:-translate-y-0.5 disabled:opacity-70 disabled:cursor-not-allowed"
+                            className="w-full flex items-center justify-center py-3.5 px-4 border border-transparent rounded-xl shadow-lg shadow-primary-500/30 text-sm font-bold text-white bg-primary-600 hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary-500 transition-all transform hover:-translate-y-0.5 disabled:opacity-70 disabled:cursor-not-allowed disabled:transform-none"
                         >
-                            {loading ? 'Authenticating...' : 'Sign In'} <ArrowRight size={18} className="ml-2" />
+                            {loading ? (
+                                <>
+                                    <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    Authenticating...
+                                </>
+                            ) : (
+                                <>
+                                    Sign In <ArrowRight size={18} className="ml-2" />
+                                </>
+                            )}
                         </button>
                     </form>
 
