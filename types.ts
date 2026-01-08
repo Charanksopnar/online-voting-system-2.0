@@ -115,6 +115,9 @@ export interface VoteTransaction {
   timestamp: string;
   blockHash: string; // Simulating blockchain hash
   riskScore?: number;
+  verificationToken?: string;
+  verificationConfidence?: number;
+  faceVerifiedAt?: string;
 }
 
 export interface FraudAlert {
