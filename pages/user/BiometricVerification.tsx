@@ -40,48 +40,14 @@ export const BiometricVerification = () => {
                 throw new Error(result.message || 'Failed to process biometric data');
             }
 
-            // Step 2: Prepare & Upload Image
-            setProcessingStep('Saving secure face photo...');
-            const faceImageBase64 = frames[Math.floor(frames.length / 2)];
-
-            // Convert base64 to Blob
-            const byteCharacters = atob(faceImageBase64);
-            const byteNumbers = new Array(byteCharacters.length);
-            for (let i = 0; i < byteCharacters.length; i++) {
-                byteNumbers[i] = byteCharacters.charCodeAt(i);
-            }
-            const byteArray = new Uint8Array(byteNumbers);
-            const blob = new Blob([byteArray], { type: 'image/jpeg' });
-
-            const fileName = `${user.id}/${Date.now()}.jpg`;
-            const { data: uploadData, error: uploadError } = await supabaseVoter
-                .storage
-                .from('faces')
-                .upload(fileName, blob, {
-                    contentType: 'image/jpeg',
-                    upsert: true
-                });
-
-            if (uploadError) {
-                console.error('File upload error:', uploadError);
-                throw new Error('Failed to upload biometric photo to secure storage');
-            }
-
-            // Get public URL
-            const { data: { publicUrl } } = supabaseVoter
-                .storage
-                .from('faces')
-                .getPublicUrl(fileName);
-
-            // Step 3: Update Profile
+            // Step 2: Update profile locally (offline-friendly)
+            // We skip immediate Supabase Storage upload here to avoid blocking on slow networks.
             setProcessingStep('Finalizing your digital ID...');
             const { error: updateError } = await supabaseVoter
                 .from('profiles')
                 .update({
-                    face_url: publicUrl,
                     face_embeddings: result.embeddings,
-                    liveness_verified: result.liveness_verified,
-                    verification_status: 'VERIFIED' // Auto-verify if biometric is set up successfully
+                    liveness_verified: result.liveness_verified
                 })
                 .eq('id', user.id);
 
@@ -193,7 +159,7 @@ export const BiometricVerification = () => {
                                         className="flex-1 px-6 py-3 bg-gradient-to-r from-primary-600 to-primary-700 text-white rounded-lg font-bold shadow-lg hover:from-primary-700 hover:to-primary-800 transition flex items-center justify-center gap-2"
                                     >
                                         <Fingerprint size={20} />
-                                        Start Verification
+                                        Start Face Verification
                                     </button>
                                 </div>
                             </div>

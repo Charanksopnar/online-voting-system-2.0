@@ -167,7 +167,7 @@ export const VerificationCamera: React.FC<VerificationCameraProps> = ({ onCaptur
                             {isCapturing
                                 ? 'Follow the instructions on screen'
                                 : isReady
-                                    ? 'Position your face and click Start Verification'
+                                    ? 'Position your face and click Start Face Verification'
                                     : 'Initializing camera...'}
                         </p>
                     </div>
@@ -185,7 +185,7 @@ export const VerificationCamera: React.FC<VerificationCameraProps> = ({ onCaptur
                             className="flex-1 px-6 py-3 bg-primary-600 text-white rounded-xl font-bold shadow-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-primary-700 transition flex items-center justify-center gap-2"
                         >
                             <Camera size={18} />
-                            {isCapturing ? 'Capturing...' : 'Start Verification'}
+                            {isCapturing ? 'Capturing...' : 'Start Face Verification'}
                         </button>
                     </div>
                 </div>

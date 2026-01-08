@@ -247,10 +247,10 @@ export const VotingPage = () => {
           try {
             if (id && selectedCandidate && user) {
               logger.info('Voting', 'Generating verification token...');
-              const token = await generateVerificationToken(user.id, id, result.confidence);
+              const token = generateVerificationToken(user.id, id, result.confidence);
 
               logger.info('Voting', 'Submitting vote with secure token...');
-              await castVote(id, selectedCandidate, user.id, 1 - result.confidence);
+              await castVote(id, selectedCandidate, user.id, 1 - result.confidence, token, result.confidence);
 
               // Mark session as completed
               if (sessionId) {

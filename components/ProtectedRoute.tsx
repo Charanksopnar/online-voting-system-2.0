@@ -12,6 +12,7 @@ interface ProtectedRouteProps {
 export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowedRoles }) => {
     const { user, loading } = useAuth();
     const { addNotification } = useNotification();
+    const unauthorizedNotifiedRef = React.useRef(false);
 
     // Show loading state while checking authentication
     if (loading) {
@@ -33,14 +34,14 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({ children, allowe
 
     // If user doesn't have the required role, redirect to their dashboard
     if (!allowedRoles.includes(user.role)) {
-        // Show notification about unauthorized access
-        React.useEffect(() => {
+        if (!unauthorizedNotifiedRef.current) {
+            unauthorizedNotifiedRef.current = true;
             addNotification(
                 'WARNING',
                 'Unauthorized Access',
-                `You don't have permission to access this page. Redirecting to your dashboard.`
+                `You don't have permission to access this page. Redirecting to your dashboard.`,
             );
-        }, []);
+        }
 
         // Redirect to appropriate dashboard based on user's actual role
         const redirectPath = user.role === UserRole.ADMIN ? '/Admin' : '/User';

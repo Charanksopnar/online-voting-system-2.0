@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { useRealtime } from '../../contexts/RealtimeContext';
 import { Shield, MapPin, CheckCircle, Fingerprint, AlertTriangle, Clock, Calendar, Award, AlertCircle, Send, Loader2 } from 'lucide-react';
+import { VerificationStatus } from '../../types';
 
 export const UserDashboard = () => {
     const { user } = useAuth();
@@ -119,17 +120,17 @@ export const UserDashboard = () => {
         return false;
     });
 
-    // User is eligible to vote if electoral roll is verified
-    const isVerified = user?.electoralRollVerified === true;
+    // Use KYC verification status for main verified badge
+    const isVerified = user?.verificationStatus === VerificationStatus.VERIFIED;
 
     // Handlers
     const handleKycClick = () => {
         setConfirmModal({
             isOpen: true,
-            title: 'Start Verification?',
-            message: 'You are about to start the identity verification process. Please ensure you have your Government ID ready and are in a well-lit area for the face scan.',
+            title: 'Start Face Verification?',
+            message: 'You are about to start the face verification process. Please ensure you have your Government ID ready and are in a well-lit area for the face scan.',
             icon: <Fingerprint className="text-yellow-500" size={28} />,
-            confirmText: 'Start KYC',
+            confirmText: 'Start Face Verification',
             confirmColor: 'bg-yellow-500 hover:bg-yellow-600',
             onConfirm: () => navigate('/BiometricVerification')
         });

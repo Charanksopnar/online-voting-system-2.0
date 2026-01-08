@@ -4,7 +4,7 @@ import { useNotification } from '../contexts/NotificationContext';
 import { extractIdData } from '../services/geminiService';
 import { LoadingOverlay } from '../components/UI/LoadingOverlay';
 import { useNavigate, Link } from 'react-router-dom';
-import { Upload, Camera, Check, RefreshCw, User, MapPin, ShieldCheck, FileText, CreditCard, X } from 'lucide-react';
+import { Upload, Camera, Check, RefreshCw, User, MapPin, ShieldCheck, FileText, CreditCard } from 'lucide-react';
 import { supabase } from '../supabase';
 import { INDIAN_STATES_DISTRICTS } from '../data/indianStatesDistricts';
 import { getEmbeddingForBase64Image, verifyIdentityAgainstDoc } from '../services/faceService';
@@ -28,7 +28,6 @@ export const Signup = () => {
     const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const [loadingMessage, setLoadingMessage] = useState('Creating Secure Profile...');
 
-    const [showAadhaarPopup, setShowAadhaarPopup] = useState(true);
     const aadhaarInputRef = useRef<HTMLInputElement>(null);
 
     // Files
@@ -214,7 +213,6 @@ export const Signup = () => {
             }
         }
     };
-
 
     const resetCamera = () => {
         setFaceImageBlob(null);
@@ -419,7 +417,7 @@ export const Signup = () => {
                 throw new Error('Invalid face embedding data generated. Please try again.');
             }
 
-            console.log(`✓ Face embeddings generated successfully: ${faceEmbeddings.length} dimensions`);
+            console.log(` Face embeddings generated successfully: ${faceEmbeddings.length} dimensions`);
             addNotification('SUCCESS', 'Biometric Success', 'Face data processed.');
 
             // 4. Create User Account
@@ -433,7 +431,6 @@ export const Signup = () => {
                 idNumber: formData.aadhaarNumber,
                 idType: 'AADHAAR'
             });
-
 
             // 5. Electoral Roll Verification + AI Identity Verification
             let verificationStatus = 'PENDING';
@@ -481,7 +478,7 @@ export const Signup = () => {
                         manualVerifyRequested = true;
                         verificationMessage = electoralResult.message;
 
-                        const mismatchDetails = [];
+                        const mismatchDetails: string[] = [];
                         if (!electoralResult.details.nameMatch) mismatchDetails.push('Name');
                         if (!electoralResult.details.dobMatch) mismatchDetails.push('DOB');
                         if (!electoralResult.details.fatherNameMatch) mismatchDetails.push('Father Name');
@@ -566,7 +563,6 @@ export const Signup = () => {
                     .eq('id', currentUser.id);
             }
 
-
             addNotification('SUCCESS', 'Registration Complete', 'Your secure voter profile has been created.');
             console.timeEnd('RegistrationTotal');
             navigate('/User');
@@ -580,67 +576,9 @@ export const Signup = () => {
         }
     };
 
-    useEffect(() => {
-        return () => {
-            if (videoRef.current && videoRef.current.srcObject) {
-                const stream = videoRef.current.srcObject as MediaStream;
-                stream.getTracks().forEach(track => track.stop());
-            }
-        };
-    }, []);
-
     return (
         <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex transition-colors duration-200">
             {loading && <LoadingOverlay message={loadingMessage} />}
-
-            {/* Auto-fill Popup */}
-            {showAadhaarPopup && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animation-fade-in">
-                    <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl max-w-md w-full p-6 relative animation-scale-up border border-slate-200 dark:border-slate-700">
-                        <button
-                            onClick={() => setShowAadhaarPopup(false)}
-                            className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
-                        >
-                            <X size={20} />
-                        </button>
-
-                        <div className="text-center space-y-4 pt-2">
-                            <div className="w-16 h-16 bg-primary-100 dark:bg-primary-900/30 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce-slow">
-                                <CreditCard className="w-8 h-8 text-primary-600 dark:text-primary-400" />
-                            </div>
-
-                            <h3 className="text-xl font-bold text-slate-900 dark:text-white">
-                                Fast-Track Registration
-                            </h3>
-
-                            <p className="text-slate-600 dark:text-slate-300 leading-relaxed px-2">
-                                Upload your Aadhaar card to automatically fetch details. This helps you fill the form automatically and prevents errors.
-                            </p>
-
-                            <div className="pt-4 flex flex-col gap-3">
-                                <button
-                                    onClick={() => {
-                                        aadhaarInputRef.current?.click();
-                                        setShowAadhaarPopup(false);
-                                    }}
-                                    className="w-full py-3 px-4 bg-primary-600 hover:bg-primary-700 text-white rounded-xl font-bold transition flex items-center justify-center gap-2 shadow-lg shadow-primary-600/20"
-                                >
-                                    <Upload size={18} />
-                                    Upload Aadhaar Now
-                                </button>
-
-                                <button
-                                    onClick={() => setShowAadhaarPopup(false)}
-                                    className="w-full py-3 px-4 bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200 rounded-xl font-medium transition"
-                                >
-                                    I'll fill it manually
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            )}
-
             {/* Left Info Panel */}
             <div className="hidden xl:flex w-1/3 bg-primary-900 relative overflow-hidden flex-col justify-between p-12 text-white">
                 <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1542204165-65bf26472b9b?auto=format&fit=crop&q=80')] bg-cover opacity-10"></div>

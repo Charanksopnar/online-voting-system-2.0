@@ -8,6 +8,7 @@ import { ThemeProvider } from './contexts/ThemeContext';
 import { Navbar } from './components/Layout/Navbar';
 import { AdminLayout } from './components/Layout/AdminLayout';
 import { ProtectedRoute } from './components/ProtectedRoute';
+import { PublicRoute } from './components/PublicRoute';
 import { UserRole } from './types';
 import { Home } from './pages/Home';
 import { Login } from './pages/Login';
@@ -66,10 +67,10 @@ export default function App() {
               <Routes>
                 {/* Standard Routes with Top Navbar */}
                 <Route element={<StandardLayout />}>
-                  <Route path="/" element={<Home />} />
-                  <Route path="/Login" element={<Login />} />
-                  <Route path="/AdminLogin" element={<AdminLogin />} />
-                  <Route path="/Signup" element={<Signup />} />
+                  <Route path="/" element={<PublicRoute><Home /></PublicRoute>} />
+                  <Route path="/Login" element={<PublicRoute><Login /></PublicRoute>} />
+                  <Route path="/AdminLogin" element={<PublicRoute><AdminLogin /></PublicRoute>} />
+                  <Route path="/Signup" element={<PublicRoute><Signup /></PublicRoute>} />
                   <Route path="/diagnostic" element={<Diagnostic />} />
 
                   {/* User Protected Routes */}

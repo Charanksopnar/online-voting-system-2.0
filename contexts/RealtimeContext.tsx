@@ -27,7 +27,14 @@ interface RealtimeContextType {
   stopElection: (id: string) => void;
   updateCandidate: (id: string, updates: Partial<Candidate>) => Promise<void>;
 
-  castVote: (electionId: string, candidateId: string, voterId: string, riskScore?: number) => void;
+  castVote: (
+    electionId: string,
+    candidateId: string,
+    voterId: string,
+    riskScore?: number,
+    verificationToken?: string,
+    verificationConfidence?: number
+  ) => Promise<void>;
   reportFraud: (alert: FraudAlert) => void;
 
   addRegion: (region: Region) => void;

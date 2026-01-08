@@ -13,6 +13,23 @@ export const Navbar = () => {
   const navigate = useNavigate();
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
 
+  const scrollToSection = (sectionId: string) => {
+    const performScroll = () => {
+      const el = document.getElementById(sectionId);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    };
+
+    if (location.pathname !== '/') {
+      navigate('/');
+      // Wait a tick for the home page to render, then scroll
+      setTimeout(performScroll, 100);
+    } else {
+      performScroll();
+    }
+  };
+
   const handleSignOut = async () => {
     await signOut();
     navigate('/');
@@ -42,8 +59,20 @@ export const Navbar = () => {
               {!user && (
                 <>
                   <Link to="/" className={isActive('/')}>Home</Link>
-                  <a href="#features" className="text-gray-600 dark:text-gray-300 hover:text-primary-500 dark:hover:text-primary-400 transition-colors">Features</a>
-                  <a href="#about" className="text-gray-600 dark:text-gray-300 hover:text-primary-500 dark:hover:text-primary-400 transition-colors">About</a>
+                  <button
+                    type="button"
+                    onClick={() => scrollToSection('features')}
+                    className="text-gray-600 dark:text-gray-300 hover:text-primary-500 dark:hover:text-primary-400 transition-colors"
+                  >
+                    Features
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => scrollToSection('about')}
+                    className="text-gray-600 dark:text-gray-300 hover:text-primary-500 dark:hover:text-primary-400 transition-colors"
+                  >
+                    About
+                  </button>
                 </>
               )}
               {user && user.role === UserRole.VOTER && (
